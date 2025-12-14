@@ -24,3 +24,26 @@ export const MENU_ITEMS = [
   { label: 'Segurança', icon: <Shield className="w-5 h-5" /> },
   { label: 'Sistema', icon: <Zap className="w-5 h-5" /> },
 ];
+
+// Feriados Fixos (Nacionais + Porto Velho/RO)
+// Formato: MM-DD
+export const PORTO_VELHO_HOLIDAYS = [
+  '01-01', // Confraternização Universal
+  '01-04', // Instalação do Estado de Rondônia
+  '01-24', // Instalação do Município de Porto Velho
+  '04-21', // Tiradentes
+  '05-01', // Dia do Trabalho
+  '09-07', // Independência do Brasil
+  '10-02', // Criação do Município de Porto Velho
+  '10-12', // Nossa Sra. Aparecida
+  '11-02', // Finados
+  '11-15', // Proclamação da República
+  '12-25', // Natal
+];
+
+// Turnos de 4 horas
+export const SHIFT_SLOTS = {
+  MORNING: { id: 'M', label: 'Manhã', start: '07:30', end: '11:30' },
+  AFTERNOON: { id: 'T', label: 'Tarde', start: '13:30', end: '17:30' },
+  NIGHT: { id: 'N', label: 'Noite', start: '18:30', end: '22:30' }
+};

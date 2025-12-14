@@ -24,6 +24,11 @@ export interface Employee {
 export interface Shift {
   date: string; // YYYY-MM-DD
   type: ShiftType;
+  courseName?: string; // Nome do curso ou atividade
+  startTime?: string;  // Ex: "08:00" - Mantido para compatibilidade, mas activeSlots tem prioridade visual
+  endTime?: string;    // Ex: "17:00"
+  totalCourseHours?: number; // Carga horária total do curso
+  activeSlots?: ('MORNING' | 'AFTERNOON' | 'NIGHT')[]; // Lista de turnos ativos no dia
   notes?: string;
 }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Employee, ShiftType, Schedule } from '../types';
-import { SHIFT_COLORS } from '../constants';
-import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save } from 'lucide-react';
+import { Employee, ShiftType, Schedule, Shift } from '../types';
+import { SHIFT_COLORS, PORTO_VELHO_HOLIDAYS, SHIFT_SLOTS } from '../constants';
+import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, BookOpen, Calculator, CalendarDays, ArrowRight, Sun, Sunset, Moon, CheckSquare, Square } from 'lucide-react';
 import NeonCard from './NeonCard';
 import { generateSmartSchedule } from '../services/geminiService';
 
@@ -10,12 +10,35 @@ interface ShiftCalendarProps {
     employees: Employee[];
 }
 
+// Configuração individual para cada turno dentro do modal
+interface SlotConfig {
+    active: boolean;
+    startDateStr: string;
+    totalHours: number;
+    endDateStr: string; // Calculada
+}
+
+interface EditingShiftState {
+    employeeId: string;
+    baseDateStr: string; // A data que foi clicada (referência)
+    type: ShiftType;
+    courseName: string;
+    
+    // Configurações independentes para cada turno
+    slots: {
+        MORNING: SlotConfig;
+        AFTERNOON: SlotConfig;
+        NIGHT: SlotConfig;
+    };
+}
+
 const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employees }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  // Removed local 'employees' state in favor of props
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
-  const [generated, setGenerated] = useState(false);
+  
+  // Modal State
+  const [editingState, setEditingState] = useState<EditingShiftState | null>(null);
 
   // Filter logic
   const displayedEmployees = filterEmployeeId 
@@ -36,7 +59,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
         const newSchedules = [...prev];
         
         employees.forEach(emp => {
-            // Check if employee already has a schedule
             if (!newSchedules.find(s => s.employeeId === emp.id)) {
                 newSchedules.push({
                     employeeId: emp.id,
@@ -48,22 +70,65 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     });
   }, [employees]);
 
+  // --- Logic for Dates, Holidays and Workdays ---
+
+  const isNonWorkingDay = (date: Date): boolean => {
+    const dayOfWeek = date.getDay(); // 0 = Sun, 6 = Sat
+    if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const key = `${mm}-${dd}`;
+
+    return PORTO_VELHO_HOLIDAYS.includes(key);
+  };
+
+  const parseDateStr = (dateStr: string): Date => {
+    const parts = dateStr.split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  };
+
+  const formatDateStr = (date: Date): string => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+  };
+
+  // Calcula datas úteis necessárias para cobrir as horas (4h por dia por turno)
+  const calculateWorkingDates = (startDateStr: string, totalHours: number): string[] => {
+      if (!startDateStr) return [];
+      if (totalHours <= 0) return [startDateStr];
+
+      const durationInDays = Math.ceil(totalHours / 4); 
+      const validDates: string[] = [];
+      
+      let currentDateIterator = parseDateStr(startDateStr);
+      let safetyCounter = 0;
+
+      while (validDates.length < durationInDays && safetyCounter < 365) {
+          if (!isNonWorkingDay(currentDateIterator)) {
+              validDates.push(formatDateStr(currentDateIterator));
+          }
+          currentDateIterator.setDate(currentDateIterator.getDate() + 1);
+          safetyCounter++;
+      }
+
+      return validDates;
+  };
+
   const handleGenerateAI = async () => {
     setLoading(true);
     try {
-      // Use filtered employees for generation if a filter is active (individual process)
       const aiData = await generateSmartSchedule(
         displayedEmployees, 
         currentDate.getFullYear(), 
         currentDate.getMonth() + 1
       );
 
-      // Map AI data back to our structure
       if (aiData && aiData.length > 0) {
         setSchedules(prev => {
             const newSchedules = [...prev];
-            
-            // Update only the returned employees
             displayedEmployees.forEach(emp => {
                 const empAiData = aiData.find((d: any) => d.employeeName === emp.name) || aiData.find((d:any) => d.employeeId === emp.id);
                 
@@ -71,13 +136,17 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                      const shifts: Record<string, any> = {};
                      empAiData.shifts.forEach((s: any) => {
                         const dayStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(s.day).padStart(2, '0')}`;
+                        // AI default: assigns MORNING and AFTERNOON for T1, just MORNING for PLAN (example logic)
+                        const type = s.type as ShiftType;
+                        const defaultSlots: ('MORNING'|'AFTERNOON'|'NIGHT')[] = type === ShiftType.T1 ? ['MORNING', 'AFTERNOON'] : ['MORNING'];
+                        
                         shifts[dayStr] = {
                            date: dayStr,
-                           type: s.type as ShiftType
+                           type: type,
+                           activeSlots: type === ShiftType.OFF ? [] : defaultSlots
                         };
                      });
                      
-                     // Find index in main state
                      const index = newSchedules.findIndex(s => s.employeeId === emp.id);
                      if (index !== -1) {
                          newSchedules[index] = { ...newSchedules[index], shifts };
@@ -86,7 +155,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
             });
             return newSchedules;
         });
-        setGenerated(true);
       }
     } catch (e) {
       console.error(e);
@@ -96,7 +164,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     }
   };
 
-  const handleSave = () => {
+  const handleSaveFile = () => {
     const fileName = `escala_rios_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.json`;
     const dataToSave = {
         month: currentDate.getMonth() + 1,
@@ -114,41 +182,297 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     document.body.removeChild(link);
   };
 
-  const getShiftType = (empId: string, day: number): ShiftType | undefined => {
+  const getShift = (empId: string, day: number): Shift | undefined => {
     const schedule = schedules.find(s => s.employeeId === empId);
     if (!schedule) return undefined;
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return schedule.shifts[dateStr]?.type;
+    return schedule.shifts[dateStr];
   };
 
-  const cycleShift = (empId: string, day: number) => {
+  const openShiftEditor = (empId: string, day: number) => {
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    
-    setSchedules(prev => prev.map(sch => {
-      if (sch.employeeId !== empId) return sch;
-      
-      const currentType = sch.shifts[dateStr]?.type || ShiftType.OFF;
-      let nextType = ShiftType.OFF;
+    const existingShift = schedules.find(s => s.employeeId === empId)?.shifts[dateStr];
 
-      switch(currentType) {
-        case ShiftType.OFF: nextType = ShiftType.T1; break;
-        case ShiftType.T1: nextType = ShiftType.PLAN; break;
-        case ShiftType.PLAN: nextType = ShiftType.FINAL; break;
-        case ShiftType.FINAL: nextType = ShiftType.OFF; break;
+    // Detect existing slots or default to empty
+    const currentSlots = existingShift?.activeSlots || [];
+
+    setEditingState({
+        employeeId: empId,
+        baseDateStr: dateStr,
+        type: existingShift?.type || ShiftType.T1,
+        courseName: existingShift?.courseName || '',
+        slots: {
+            MORNING: {
+                active: currentSlots.includes('MORNING'),
+                startDateStr: dateStr,
+                totalHours: 0,
+                endDateStr: dateStr
+            },
+            AFTERNOON: {
+                active: currentSlots.includes('AFTERNOON'),
+                startDateStr: dateStr,
+                totalHours: 0,
+                endDateStr: dateStr
+            },
+            NIGHT: {
+                active: currentSlots.includes('NIGHT'),
+                startDateStr: dateStr,
+                totalHours: 0,
+                endDateStr: dateStr
+            }
+        }
+    });
+  };
+
+  const saveShiftDetails = () => {
+      if (!editingState) return;
+
+      setSchedules(prev => prev.map(sch => {
+          if (sch.employeeId !== editingState.employeeId) return sch;
+
+          const updatedShifts = { ...sch.shifts };
+
+          // Helper to add slot to a day
+          const addSlotToDay = (dateStr: string, slot: 'MORNING' | 'AFTERNOON' | 'NIGHT') => {
+              if (!updatedShifts[dateStr]) {
+                  updatedShifts[dateStr] = {
+                      date: dateStr,
+                      type: editingState.type, // Use the selected type for all generated days
+                      courseName: editingState.courseName,
+                      activeSlots: []
+                  };
+              } else {
+                  // Update common props if overwriting
+                  updatedShifts[dateStr].type = editingState.type;
+                  updatedShifts[dateStr].courseName = editingState.courseName;
+              }
+              
+              const slots = updatedShifts[dateStr].activeSlots || [];
+              if (!slots.includes(slot)) {
+                  slots.push(slot);
+              }
+              updatedShifts[dateStr].activeSlots = slots;
+          };
+
+          // 1. Process Morning
+          if (editingState.slots.MORNING.active) {
+              const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours || 4);
+              dates.forEach(d => addSlotToDay(d, 'MORNING'));
+          }
+
+          // 2. Process Afternoon
+          if (editingState.slots.AFTERNOON.active) {
+              const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours || 4);
+              dates.forEach(d => addSlotToDay(d, 'AFTERNOON'));
+          }
+
+          // 3. Process Night
+          if (editingState.slots.NIGHT.active) {
+              const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours || 4);
+              dates.forEach(d => addSlotToDay(d, 'NIGHT'));
+          }
+          
+          // If no slots are active (User unchecked everything on a day), we might want to set it to OFF or clear slots
+          // Current logic appends. If the user wants to clear, they would need to start fresh or we'd need a "Clear Range" feature.
+          // For now, this additive logic works for scheduling.
+
+          return {
+              ...sch,
+              shifts: updatedShifts
+          };
+      }));
+      setEditingState(null);
+  };
+
+  const updateSlotConfig = (slotName: 'MORNING' | 'AFTERNOON' | 'NIGHT', field: keyof SlotConfig, value: any) => {
+      if (!editingState) return;
+
+      const currentSlotConfig = editingState.slots[slotName];
+      let newConfig = { ...currentSlotConfig, [field]: value };
+
+      // Auto-calculate end date if start date or hours change
+      if (field === 'startDateStr' || field === 'totalHours') {
+          const startDate = field === 'startDateStr' ? value : currentSlotConfig.startDateStr;
+          const hours = field === 'totalHours' ? Number(value) : currentSlotConfig.totalHours;
+          
+          const dates = calculateWorkingDates(startDate, hours);
+          const newEndDate = dates.length > 0 ? dates[dates.length - 1] : startDate;
+          newConfig.endDateStr = newEndDate;
       }
 
-      return {
-        ...sch,
-        shifts: {
-          ...sch.shifts,
-          [dateStr]: { date: dateStr, type: nextType }
-        }
-      };
-    }));
+      setEditingState({
+          ...editingState,
+          slots: {
+              ...editingState.slots,
+              [slotName]: newConfig
+          }
+      });
+  };
+
+  const toggleSlot = (slotName: 'MORNING' | 'AFTERNOON' | 'NIGHT') => {
+      if (!editingState) return;
+      updateSlotConfig(slotName, 'active', !editingState.slots[slotName].active);
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 relative">
+      
+      {/* Modal Overlay */}
+      {editingState && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="w-full max-w-2xl mx-4">
+                  <NeonCard glowColor="cyan" className="shadow-2xl" title="Gestão de Turnos & Escala">
+                      <div className="space-y-6">
+                          
+                          {/* Top: Shift Type Selector */}
+                          <div className="grid grid-cols-4 gap-2">
+                              {Object.values(ShiftType).map((type) => (
+                                  <button
+                                      key={type}
+                                      onClick={() => setEditingState({...editingState, type})}
+                                      className={`
+                                          p-2 rounded border text-xs font-bold transition-all
+                                          ${editingState.type === type 
+                                              ? SHIFT_COLORS[type] + ' ring-2 ring-white/20' 
+                                              : 'bg-slate-900 border-white/10 text-slate-500 hover:bg-slate-800'}
+                                      `}
+                                  >
+                                      {type}
+                                  </button>
+                              ))}
+                          </div>
+
+                          <div className="space-y-2">
+                              <label className="text-xs font-mono uppercase text-slate-400 flex items-center gap-2">
+                                  <BookOpen size={14} className="text-cyan-400" />
+                                  Nome do Curso / Atividade
+                              </label>
+                              <input 
+                                  type="text"
+                                  value={editingState.courseName}
+                                  onChange={(e) => setEditingState({...editingState, courseName: e.target.value})}
+                                  placeholder="Ex: Treinamento NR-10"
+                                  className="w-full bg-slate-950 border border-white/10 rounded p-3 text-white focus:border-cyan-500 focus:outline-none focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all"
+                              />
+                          </div>
+
+                          {/* Multi-Shift Configuration Grid */}
+                          <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-xs font-mono uppercase text-slate-500 pb-1 border-b border-white/10">
+                                  <span className="w-24">Turno</span>
+                                  <span className="flex-1">Início da Escala</span>
+                                  <span className="w-24">Carga (h)</span>
+                                  <span className="flex-1 text-right">Fim Previsto</span>
+                              </div>
+
+                              {/* Morning Row */}
+                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-cyan-500/5 border-cyan-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                                  <div 
+                                    className="flex items-center gap-2 cursor-pointer"
+                                    onClick={() => toggleSlot('MORNING')}
+                                  >
+                                      {editingState.slots.MORNING.active ? <CheckSquare size={16} className="text-cyan-400"/> : <Square size={16} className="text-slate-500"/>}
+                                      <span className="font-bold text-sm text-white">Manhã</span>
+                                  </div>
+                                  <input 
+                                      type="date" 
+                                      value={editingState.slots.MORNING.startDateStr}
+                                      disabled={!editingState.slots.MORNING.active}
+                                      onChange={(e) => updateSlotConfig('MORNING', 'startDateStr', e.target.value)}
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                  />
+                                  <input 
+                                      type="number" step="4" min="0"
+                                      value={editingState.slots.MORNING.totalHours || ''}
+                                      disabled={!editingState.slots.MORNING.active}
+                                      onChange={(e) => updateSlotConfig('MORNING', 'totalHours', e.target.value)}
+                                      placeholder="Hrs"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
+                                  />
+                                  <div className="text-right text-xs font-mono font-bold text-cyan-300">
+                                      {editingState.slots.MORNING.active && editingState.slots.MORNING.endDateStr.split('-').reverse().join('/')}
+                                  </div>
+                              </div>
+
+                              {/* Afternoon Row */}
+                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.AFTERNOON.active ? 'bg-orange-500/5 border-orange-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                                  <div 
+                                    className="flex items-center gap-2 cursor-pointer"
+                                    onClick={() => toggleSlot('AFTERNOON')}
+                                  >
+                                      {editingState.slots.AFTERNOON.active ? <CheckSquare size={16} className="text-orange-400"/> : <Square size={16} className="text-slate-500"/>}
+                                      <span className="font-bold text-sm text-white">Tarde</span>
+                                  </div>
+                                  <input 
+                                      type="date" 
+                                      value={editingState.slots.AFTERNOON.startDateStr}
+                                      disabled={!editingState.slots.AFTERNOON.active}
+                                      onChange={(e) => updateSlotConfig('AFTERNOON', 'startDateStr', e.target.value)}
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                  />
+                                  <input 
+                                      type="number" step="4" min="0"
+                                      value={editingState.slots.AFTERNOON.totalHours || ''}
+                                      disabled={!editingState.slots.AFTERNOON.active}
+                                      onChange={(e) => updateSlotConfig('AFTERNOON', 'totalHours', e.target.value)}
+                                      placeholder="Hrs"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
+                                  />
+                                  <div className="text-right text-xs font-mono font-bold text-orange-300">
+                                      {editingState.slots.AFTERNOON.active && editingState.slots.AFTERNOON.endDateStr.split('-').reverse().join('/')}
+                                  </div>
+                              </div>
+
+                              {/* Night Row */}
+                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.NIGHT.active ? 'bg-purple-500/5 border-purple-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                                  <div 
+                                    className="flex items-center gap-2 cursor-pointer"
+                                    onClick={() => toggleSlot('NIGHT')}
+                                  >
+                                      {editingState.slots.NIGHT.active ? <CheckSquare size={16} className="text-purple-400"/> : <Square size={16} className="text-slate-500"/>}
+                                      <span className="font-bold text-sm text-white">Noite</span>
+                                  </div>
+                                  <input 
+                                      type="date" 
+                                      value={editingState.slots.NIGHT.startDateStr}
+                                      disabled={!editingState.slots.NIGHT.active}
+                                      onChange={(e) => updateSlotConfig('NIGHT', 'startDateStr', e.target.value)}
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                  />
+                                  <input 
+                                      type="number" step="4" min="0"
+                                      value={editingState.slots.NIGHT.totalHours || ''}
+                                      disabled={!editingState.slots.NIGHT.active}
+                                      onChange={(e) => updateSlotConfig('NIGHT', 'totalHours', e.target.value)}
+                                      placeholder="Hrs"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
+                                  />
+                                  <div className="text-right text-xs font-mono font-bold text-purple-300">
+                                      {editingState.slots.NIGHT.active && editingState.slots.NIGHT.endDateStr.split('-').reverse().join('/')}
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="flex gap-3 pt-2">
+                              <button 
+                                  onClick={() => setEditingState(null)}
+                                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-lg font-bold transition-colors"
+                              >
+                                  Cancelar
+                              </button>
+                              <button 
+                                  onClick={saveShiftDetails}
+                                  className="flex-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-3 rounded-lg font-bold shadow-lg hover:shadow-neon-cyan transition-all flex items-center justify-center gap-2"
+                              >
+                                  <Save size={16} /> Aplicar Escala
+                              </button>
+                          </div>
+                      </div>
+                  </NeonCard>
+              </div>
+          </div>
+      )}
+
       {/* Calendar Controls */}
       <NeonCard className="p-0" glowColor="cyan">
         <div className="flex flex-col md:flex-row justify-between items-center p-4 gap-4">
@@ -195,11 +519,11 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
              </button>
              
              <button 
-                onClick={handleSave}
+                onClick={handleSaveFile}
                 className="flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-sm tracking-wider uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all hover:text-white"
              >
                 <Save className="w-4 h-4" />
-                Salvar / Exportar
+                Salvar
              </button>
           </div>
         </div>
@@ -215,7 +539,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                   <span className="text-xs font-mono text-slate-500 uppercase">Colaborador</span>
                 </th>
                 {daysArray.map(day => (
-                  <th key={day} className="p-2 min-w-[40px] text-center border-b border-white/10 bg-sci-bg/50">
+                  <th key={day} className="p-2 min-w-[50px] text-center border-b border-white/10 bg-sci-bg/50">
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] text-slate-500 font-mono">
                         {new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toLocaleDateString('pt-BR', { weekday: 'narrow' })}
@@ -246,22 +570,32 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                     </div>
                   </td>
                   {daysArray.map(day => {
-                    const shiftType = getShiftType(emp.id, day) || ShiftType.OFF;
-                    const styleClass = SHIFT_COLORS[shiftType];
+                    const shift = getShift(emp.id, day);
+                    const shiftType = shift?.type || ShiftType.OFF;
+                    // Check slots
+                    const hasMorning = shift?.activeSlots?.includes('MORNING');
+                    const hasAfternoon = shift?.activeSlots?.includes('AFTERNOON');
+                    const hasNight = shift?.activeSlots?.includes('NIGHT');
+                    
+                    // Determine styling based on if ANY slot is active vs OFF
+                    const isOff = shiftType === ShiftType.OFF;
+                    const cellBg = isOff ? 'bg-slate-900/40' : '';
                     
                     return (
                       <td 
                         key={`${emp.id}-${day}`} 
-                        onClick={() => cycleShift(emp.id, day)}
-                        className="p-1 border-b border-white/5 cursor-pointer relative"
+                        onClick={() => openShiftEditor(emp.id, day)}
+                        className={`p-1 border-b border-white/5 cursor-pointer relative ${cellBg} hover:bg-white/5`}
                       >
-                         <div className={`
-                            w-full h-10 rounded flex items-center justify-center text-[10px] font-bold tracking-tighter transition-all duration-300
-                            border
-                            ${styleClass}
-                            hover:scale-105 hover:z-10
-                         `}>
-                           {shiftType !== ShiftType.OFF && shiftType}
+                         <div className="w-full h-10 flex flex-col justify-between py-0.5 gap-[1px]">
+                           {/* Morning Slot Indicator */}
+                           <div className={`h-full w-full rounded-sm transition-all ${hasMorning ? 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]' : 'bg-slate-800/50'}`}></div>
+                           
+                           {/* Afternoon Slot Indicator */}
+                           <div className={`h-full w-full rounded-sm transition-all ${hasAfternoon ? 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]' : 'bg-slate-800/50'}`}></div>
+                           
+                           {/* Night Slot Indicator */}
+                           <div className={`h-full w-full rounded-sm transition-all ${hasNight ? 'bg-purple-500 shadow-[0_0_5px_rgba(168,85,247,0.6)]' : 'bg-slate-800/50'}`}></div>
                          </div>
                       </td>
                     );
@@ -274,16 +608,19 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       </NeonCard>
       
       {/* Legend */}
-      <div className="flex flex-wrap gap-4 px-4">
-         {Object.values(ShiftType).map(type => {
-            if (type === ShiftType.OFF) return null;
-            return (
-                <div key={type} className="flex items-center gap-2">
-                    <div className={`w-3 h-3 rounded-full ${SHIFT_COLORS[type].split(' ')[0]}`}></div>
-                    <span className="text-xs text-slate-400 font-mono">{type}</span>
-                </div>
-            )
-         })}
+      <div className="flex flex-wrap gap-6 px-4 items-center">
+         <div className="flex items-center gap-2">
+             <div className="w-3 h-3 bg-cyan-500 rounded-sm shadow-[0_0_5px_rgba(6,182,212,0.6)]"></div>
+             <span className="text-xs text-slate-400 font-mono">Manhã (07:30-11:30)</span>
+         </div>
+         <div className="flex items-center gap-2">
+             <div className="w-3 h-3 bg-orange-500 rounded-sm shadow-[0_0_5px_rgba(249,115,22,0.6)]"></div>
+             <span className="text-xs text-slate-400 font-mono">Tarde (13:30-17:30)</span>
+         </div>
+         <div className="flex items-center gap-2">
+             <div className="w-3 h-3 bg-purple-500 rounded-sm shadow-[0_0_5px_rgba(168,85,247,0.6)]"></div>
+             <span className="text-xs text-slate-400 font-mono">Noite (18:30-22:30)</span>
+         </div>
       </div>
     </div>
   );
