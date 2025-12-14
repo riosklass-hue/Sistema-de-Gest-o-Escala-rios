@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Employee, ShiftType, Schedule, Shift } from '../types';
 import { SHIFT_COLORS, PORTO_VELHO_HOLIDAYS, SHIFT_SLOTS } from '../constants';
-import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, BookOpen, Calculator, CalendarDays, ArrowRight, Sun, Sunset, Moon, CheckSquare, Square } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, BookOpen, Calculator, CalendarDays, ArrowRight, Sun, Sunset, Moon, CheckSquare, Square, CheckCircle } from 'lucide-react';
 import NeonCard from './NeonCard';
 import { generateSmartSchedule } from '../services/geminiService';
 
 interface ShiftCalendarProps {
     filterEmployeeId?: string | null;
     employees: Employee[];
+    onSave?: (schedules: Schedule[]) => void;
+    currentSchedules?: Schedule[]; // Receive data from parent
 }
 
 // Configuração individual para cada turno dentro do modal
@@ -32,10 +34,11 @@ interface EditingShiftState {
     };
 }
 
-const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employees }) => {
+const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employees, onSave, currentSchedules }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   
   // Modal State
   const [editingState, setEditingState] = useState<EditingShiftState | null>(null);
@@ -76,19 +79,31 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
 
   // --- Automatic Schedule Initialization ---
   useEffect(() => {
-    setSchedules(prev => {
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const daysInCurrentMonth = getDaysInMonth(year, month);
+    // Determine which base to use: incoming props (persisted) or existing local state
+    const baseSchedules = (currentSchedules && currentSchedules.length > 0) 
+        ? currentSchedules 
+        : schedules;
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInCurrentMonth = getDaysInMonth(year, month);
+    
+    // Create new structure without overwriting existing data for this month
+    const newSchedules = employees.map(emp => {
+        // Try to find existing schedule for this employee
+        const existingSchedule = baseSchedules.find(s => s.employeeId === emp.id);
         
-        const newSchedules = employees.map(emp => {
-            const existingSchedule = prev.find(s => s.employeeId === emp.id);
-            const shifts = existingSchedule ? { ...existingSchedule.shifts } : {};
+        // Clone shifts to avoid mutation
+        const shifts = existingSchedule ? { ...existingSchedule.shifts } : {};
 
-            for (let day = 1; day <= daysInCurrentMonth; day++) {
-                const dateObj = new Date(year, month, day);
-                const dateStr = formatDateStr(dateObj);
+        for (let day = 1; day <= daysInCurrentMonth; day++) {
+            const dateObj = new Date(year, month, day);
+            const dateStr = formatDateStr(dateObj);
 
+            // AUTO-FILL LOGIC: 
+            // Only auto-fill if the slot is completely EMPTY.
+            // This prevents overwriting manual edits (like user changing a Saturday to T1).
+            if (!shifts[dateStr]) {
                 if (isNonWorkingDay(dateObj)) {
                     shifts[dateStr] = {
                         date: dateStr,
@@ -96,22 +111,21 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                         activeSlots: ['MORNING', 'AFTERNOON', 'NIGHT'],
                         courseName: 'Final de Semana / Feriado'
                     };
-                } else {
-                    if (!shifts[dateStr]) {
-                       // Keep empty for manual/AI filling
-                    }
                 }
             }
+        }
 
-            return {
-                employeeId: emp.id,
-                shifts: shifts
-            };
-        });
-        
-        return newSchedules;
+        return {
+            employeeId: emp.id,
+            shifts: shifts
+        };
     });
-  }, [employees, currentDate, isNonWorkingDay]);
+    
+    setSchedules(newSchedules);
+    // We intentionally do not depend on 'schedules' here to avoid infinite loops, 
+    // but we depend on 'currentSchedules' so if parent updates, we update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees, currentDate, isNonWorkingDay, currentSchedules]); 
 
   const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -195,22 +209,15 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     }
   };
 
-  const handleSaveFile = () => {
-    const fileName = `escala_rios_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.json`;
-    const dataToSave = {
-        month: currentDate.getMonth() + 1,
-        year: currentDate.getFullYear(),
-        schedules: schedules
-    };
-    const json = JSON.stringify(dataToSave, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleSaveSystem = () => {
+    // 1. Save to App State for Reports
+    if (onSave) {
+        onSave(schedules);
+    }
+    
+    // 2. Feedback
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const getShift = (empId: string, day: number): Shift | undefined => {
@@ -282,30 +289,55 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
               updatedShifts[dateStr].activeSlots = slots;
           };
 
-          if (editingState.slots.MORNING.active) {
-              const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours || 4);
-              dates.forEach(d => addSlotToDay(d, 'MORNING'));
+          // --- FIX: Strictly set slots for the base date first ---
+          // This ensures that if I uncheck a box for the day I clicked, it actually removes it.
+          // We reset the activeSlots for the baseDateStr and rebuild them based on the checkboxes.
+          const baseDate = editingState.baseDateStr;
+          
+          // Initialise or get object
+          if (!updatedShifts[baseDate]) {
+              updatedShifts[baseDate] = {
+                  date: baseDate,
+                  type: editingState.type,
+                  courseName: editingState.courseName,
+                  activeSlots: []
+              };
+          } else {
+              updatedShifts[baseDate].type = editingState.type;
+              updatedShifts[baseDate].courseName = editingState.courseName;
+              // Clear slots to ensure we respect unchecking
+              updatedShifts[baseDate].activeSlots = []; 
           }
 
-          if (editingState.slots.AFTERNOON.active) {
-              const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours || 4);
-              dates.forEach(d => addSlotToDay(d, 'AFTERNOON'));
+          // Rebuild for base day
+          if (editingState.slots.MORNING.active) updatedShifts[baseDate].activeSlots?.push('MORNING');
+          if (editingState.slots.AFTERNOON.active) updatedShifts[baseDate].activeSlots?.push('AFTERNOON');
+          if (editingState.slots.NIGHT.active) updatedShifts[baseDate].activeSlots?.push('NIGHT');
+
+
+          // --- Handle Multi-Day logic (Courses) additive ---
+          // If totalHours > 4, it means it spans multiple days. We add slots to subsequent days.
+          
+          if (editingState.slots.MORNING.active && editingState.slots.MORNING.totalHours > 4) {
+              const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours);
+              // Filter out baseDate to not duplicate/mess up logic above
+              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'MORNING'));
           }
 
-          if (editingState.slots.NIGHT.active) {
-              const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours || 4);
-              dates.forEach(d => addSlotToDay(d, 'NIGHT'));
+          if (editingState.slots.AFTERNOON.active && editingState.slots.AFTERNOON.totalHours > 4) {
+              const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours);
+              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'AFTERNOON'));
           }
 
-          // Case: User selected OFF, we must create the record even if no slots active
-          if (editingState.type === ShiftType.OFF && 
-              !editingState.slots.MORNING.active && 
-              !editingState.slots.AFTERNOON.active && 
-              !editingState.slots.NIGHT.active) {
-                
-             const dateStr = editingState.baseDateStr;
-             updatedShifts[dateStr] = {
-                date: dateStr,
+          if (editingState.slots.NIGHT.active && editingState.slots.NIGHT.totalHours > 4) {
+              const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours);
+              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'NIGHT'));
+          }
+
+          // Case: User selected OFF
+          if (editingState.type === ShiftType.OFF) {
+             updatedShifts[baseDate] = {
+                date: baseDate,
                 type: ShiftType.OFF,
                 courseName: 'Folga',
                 activeSlots: []
@@ -566,11 +598,14 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
              </button>
              
              <button 
-                onClick={handleSaveFile}
-                className="flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-sm tracking-wider uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all hover:text-white"
+                onClick={handleSaveSystem}
+                className={`
+                   flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-sm tracking-wider uppercase transition-all
+                   ${saveSuccess ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white'}
+                `}
              >
-                <Save className="w-4 h-4" />
-                Salvar
+                {saveSuccess ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                {saveSuccess ? 'Salvo!' : 'Salvar'}
              </button>
           </div>
         </div>

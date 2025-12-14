@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, Cell } from 'recharts';
 import NeonCard from './NeonCard';
-import { Employee } from '../types';
-import { DollarSign, Clock, TrendingUp, Wallet, Download } from 'lucide-react';
+import { Employee, Schedule, ShiftType } from '../types';
+import { DollarSign, Clock, TrendingUp, Wallet, Download, Activity, Database } from 'lucide-react';
 
 // Configuração de Valores (Simulação de Regras de Negócio)
 const RATES: Record<string, number> = {
@@ -13,62 +13,90 @@ const RATES: Record<string, number> = {
   'Planejamento': 60.00
 };
 
-const SHIFT_HOURS = {
-  'T1': 8,
-  'Q1': 8,
-  'PLAN': 8,
-  'FINAL': 12,
-  'OFF': 0
-};
-
-// Gerador de dados simulados
-const generateReportData = (employees: Employee[]) => {
-  return employees.map(emp => {
-    // Simulação de turnos realizados no mês
-    const t1Count = Math.floor(Math.random() * 10) + 2;
-    const q1Count = Math.floor(Math.random() * 5);
-    const planCount = Math.floor(Math.random() * 8) + 2;
-    const finalCount = Math.floor(Math.random() * 3) + 1;
-    
-    const totalHours = (t1Count * SHIFT_HOURS.T1) + (q1Count * SHIFT_HOURS.Q1) + (planCount * SHIFT_HOURS.PLAN) + (finalCount * SHIFT_HOURS.FINAL);
-    const hourlyRate = RATES[emp.role] || 50;
-    const baseValue = totalHours * hourlyRate;
-    const bonus = finalCount * (hourlyRate * 0.5 * 12); // 50% extra no final de semana
-    const totalValue = baseValue + bonus;
-
-    return {
-      ...emp,
-      t1Count,
-      q1Count,
-      planCount,
-      finalCount,
-      totalHours,
-      hourlyRate,
-      totalValue,
-      efficiency: Math.floor(Math.random() * 15) + 85 // 85-100%
-    };
-  });
-};
-
 interface ReportsPanelProps {
     filterEmployeeId?: string | null;
     employees: Employee[];
+    schedules: Schedule[]; // Dados reais recebidos do App/Calendar
 }
 
-const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees }) => {
+const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees, schedules }) => {
+  
   const data = useMemo(() => {
     let targetEmployees = employees;
     if (filterEmployeeId) {
         targetEmployees = employees.filter(e => e.id === filterEmployeeId);
     }
-    return generateReportData(targetEmployees);
-  }, [filterEmployeeId, employees]);
+
+    return targetEmployees.map(emp => {
+        // Encontrar escala do funcionário
+        const empSchedule = schedules.find(s => s.employeeId === emp.id);
+        const shifts = empSchedule ? Object.values(empSchedule.shifts) : [];
+
+        // Calcular contadores reais
+        let t1Count = 0;
+        let q1Count = 0;
+        let planCount = 0;
+        let finalCount = 0;
+        let totalHours = 0;
+        const activitiesSet = new Set<string>();
+
+        shifts.forEach(shift => {
+             // Contagem de tipos
+             if (shift.type === ShiftType.T1) t1Count++;
+             else if (shift.type === ShiftType.Q1) q1Count++;
+             else if (shift.type === ShiftType.PLAN) planCount++;
+             else if (shift.type === ShiftType.FINAL) finalCount++;
+
+             // Cálculo de horas (4h por slot ativo)
+             const slots = shift.activeSlots || [];
+             totalHours += (slots.length * 4);
+
+             // Coletar atividades (excluindo vazios ou "Final de Semana")
+             if (shift.courseName && shift.type !== ShiftType.FINAL && shift.type !== ShiftType.OFF) {
+                 activitiesSet.add(shift.courseName);
+             }
+        });
+
+        // Cálculos financeiros
+        const hourlyRate = RATES[emp.role] || 50;
+        const baseValue = totalHours * hourlyRate;
+        const bonus = finalCount * (hourlyRate * 0.5 * 12); // Exemplo de bônus
+        const totalValue = baseValue + bonus;
+
+        return {
+            ...emp,
+            t1Count,
+            q1Count,
+            planCount,
+            finalCount,
+            totalHours,
+            hourlyRate,
+            totalValue,
+            efficiency: totalHours > 0 ? Math.floor(Math.random() * 10) + 90 : 0, // Mock efficiency if active
+            recentActivities: Array.from(activitiesSet).slice(0, 3) // Top 3 activities
+        };
+    });
+  }, [filterEmployeeId, employees, schedules]);
 
   const totalBudget = data.reduce((acc, curr) => acc + curr.totalValue, 0);
   const totalHours = data.reduce((acc, curr) => acc + curr.totalHours, 0);
-  const avgEfficiency = Math.round(data.reduce((acc, curr) => acc + curr.efficiency, 0) / data.length);
+  const avgEfficiency = data.length > 0 ? Math.round(data.reduce((acc, curr) => acc + curr.efficiency, 0) / data.length) : 0;
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+
+  if (!schedules || schedules.length === 0) {
+      return (
+          <div className="flex flex-col items-center justify-center h-64 text-center space-y-4 animate-in fade-in">
+              <div className="p-4 bg-slate-800/50 rounded-full border border-white/10">
+                  <Database className="w-8 h-8 text-slate-500" />
+              </div>
+              <div>
+                  <h3 className="text-xl font-bold text-white">Sem dados de escala</h3>
+                  <p className="text-slate-400">Salve uma escala no módulo "Escalas" para gerar relatórios.</p>
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -156,14 +184,14 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
       </div>
 
       {/* Detailed Table */}
-      <NeonCard title="Detalhamento Financeiro" glowColor="none" icon={<Wallet size={16} />}>
+      <NeonCard title="Detalhamento Financeiro e Atividades" glowColor="none" icon={<Wallet size={16} />}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-white/10 text-xs text-slate-500 font-mono uppercase">
                 <th className="p-4">Colaborador</th>
-                <th className="p-4 text-center">Taxa/Hora</th>
-                <th className="p-4 text-center">Horas Totais</th>
+                <th className="p-4">Atividades Recentes</th>
+                <th className="p-4 text-center">Horas</th>
                 <th className="p-4 text-right">Valor Bruto</th>
                 <th className="p-4 text-center">Ações</th>
               </tr>
@@ -180,8 +208,18 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
                         </div>
                     </div>
                   </td>
-                  <td className="p-4 text-center text-slate-400 font-mono text-sm">
-                    {formatCurrency(row.hourlyRate)}
+                  <td className="p-4">
+                     <div className="flex flex-wrap gap-1">
+                         {row.recentActivities.length > 0 ? (
+                             row.recentActivities.map((act, idx) => (
+                                 <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] border border-white/10">
+                                     {act}
+                                 </span>
+                             ))
+                         ) : (
+                             <span className="text-slate-600 text-[10px] italic">Nenhuma atividade reg.</span>
+                         )}
+                     </div>
                   </td>
                   <td className="p-4 text-center">
                     <span className="inline-block px-2 py-1 bg-purple-500/10 text-purple-300 rounded text-xs font-bold border border-purple-500/20">

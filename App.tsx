@@ -7,7 +7,7 @@ import RegistrationPanel from './components/RegistrationPanel';
 import { INITIAL_EMPLOYEES } from './constants';
 import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut, Activity, User as UserIcon, Database, Shield, Zap, UserPlus } from 'lucide-react';
 import NeonCard from './components/NeonCard';
-import { User, Employee } from './types';
+import { User, Employee, Schedule } from './types';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -17,6 +17,9 @@ const App: React.FC = () => {
   
   // Lifted state for employees to share between components
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+  
+  // State to hold saved schedules shared between Calendar and Reports
+  const [globalSchedules, setGlobalSchedules] = useState<Schedule[]>([]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -44,6 +47,12 @@ const App: React.FC = () => {
 
   const handleRegisterEmployee = (newEmployee: Employee) => {
     setEmployees(prev => [...prev, newEmployee]);
+  };
+
+  const handleSaveSchedules = (schedules: Schedule[]) => {
+    setGlobalSchedules(schedules);
+    // Optional: Add logic here to persist to backend in a real app
+    // For now, we update the state so ReportsPanel can see it immediately
   };
 
   // Construct menu items dynamically based on role
@@ -201,12 +210,21 @@ const App: React.FC = () => {
 
                {activeTab === 'Escalas' && (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <ShiftCalendar filterEmployeeId={filterEmployeeId} employees={employees} />
+                    <ShiftCalendar 
+                      filterEmployeeId={filterEmployeeId} 
+                      employees={employees}
+                      currentSchedules={globalSchedules} // Pass data from parent
+                      onSave={handleSaveSchedules} 
+                    />
                   </div>
                )}
 
                {activeTab === 'Relatórios' && (
-                  <ReportsPanel filterEmployeeId={filterEmployeeId} employees={employees} />
+                  <ReportsPanel 
+                    filterEmployeeId={filterEmployeeId} 
+                    employees={employees} 
+                    schedules={globalSchedules} // Pass live data
+                  />
                )}
 
                {['Segurança', 'Sistema'].includes(activeTab) && (
