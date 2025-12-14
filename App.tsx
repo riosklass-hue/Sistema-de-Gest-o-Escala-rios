@@ -3,16 +3,20 @@ import ShiftCalendar from './components/ShiftCalendar';
 import StatsPanel from './components/StatsPanel';
 import ReportsPanel from './components/ReportsPanel';
 import LoginScreen from './components/LoginScreen';
-import { MENU_ITEMS } from './constants';
-import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut } from 'lucide-react';
+import RegistrationPanel from './components/RegistrationPanel';
+import { INITIAL_EMPLOYEES } from './constants';
+import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut, Activity, User as UserIcon, Database, Shield, Zap, UserPlus } from 'lucide-react';
 import NeonCard from './components/NeonCard';
-import { User } from './types';
+import { User, Employee } from './types';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('Escalas');
   const [insight, setInsight] = useState<string>('');
+  
+  // Lifted state for employees to share between components
+  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -26,6 +30,8 @@ const App: React.FC = () => {
       setInsight("S.G.E. Nexus: Visualizando métricas de desempenho.");
     } else if (activeTab === 'Relatórios') {
         setInsight("S.G.E. Nexus: Processando dados financeiros e volumetria de horas.");
+    } else if (activeTab === 'Cadastro') {
+        setInsight("S.G.E. Nexus: Módulo de registro de novos usuários e colaboradores.");
     } else {
       setInsight(`S.G.E. Nexus: Acesso ao módulo ${activeTab} restrito.`);
     }
@@ -35,6 +41,20 @@ const App: React.FC = () => {
     setCurrentUser(null);
     setActiveTab('Escalas');
   };
+
+  const handleRegisterEmployee = (newEmployee: Employee) => {
+    setEmployees(prev => [...prev, newEmployee]);
+  };
+
+  // Construct menu items dynamically based on role
+  const menuItems = [
+      { label: 'Dashboard', icon: <Activity className="w-5 h-5" /> },
+      ...(currentUser?.role === 'ADMIN' ? [{ label: 'Cadastro', icon: <UserPlus className="w-5 h-5" /> }] : []),
+      { label: 'Escalas', icon: <UserIcon className="w-5 h-5" /> },
+      { label: 'Relatórios', icon: <Database className="w-5 h-5" /> },
+      { label: 'Segurança', icon: <Shield className="w-5 h-5" /> },
+      { label: 'Sistema', icon: <Zap className="w-5 h-5" /> },
+  ];
 
   // Render Login Screen if not authenticated
   if (!currentUser) {
@@ -74,7 +94,7 @@ const App: React.FC = () => {
             </div>
             
             <nav className="p-4 space-y-2">
-              {MENU_ITEMS.map((item, idx) => (
+              {menuItems.map((item, idx) => (
                 <button 
                   key={idx}
                   onClick={() => setActiveTab(item.label)}
@@ -175,14 +195,18 @@ const App: React.FC = () => {
                  </>
                )}
 
+               {activeTab === 'Cadastro' && currentUser.role === 'ADMIN' && (
+                  <RegistrationPanel onRegisterEmployee={handleRegisterEmployee} />
+               )}
+
                {activeTab === 'Escalas' && (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <ShiftCalendar filterEmployeeId={filterEmployeeId} />
+                    <ShiftCalendar filterEmployeeId={filterEmployeeId} employees={employees} />
                   </div>
                )}
 
                {activeTab === 'Relatórios' && (
-                  <ReportsPanel filterEmployeeId={filterEmployeeId} />
+                  <ReportsPanel filterEmployeeId={filterEmployeeId} employees={employees} />
                )}
 
                {['Segurança', 'Sistema'].includes(activeTab) && (

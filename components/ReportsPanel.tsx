@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, Cell } from 'recharts';
 import NeonCard from './NeonCard';
-import { INITIAL_EMPLOYEES } from '../constants';
 import { Employee } from '../types';
 import { DollarSign, Clock, TrendingUp, Wallet, Download } from 'lucide-react';
 
@@ -50,16 +49,17 @@ const generateReportData = (employees: Employee[]) => {
 
 interface ReportsPanelProps {
     filterEmployeeId?: string | null;
+    employees: Employee[];
 }
 
-const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId }) => {
+const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees }) => {
   const data = useMemo(() => {
-    let targetEmployees = INITIAL_EMPLOYEES;
+    let targetEmployees = employees;
     if (filterEmployeeId) {
-        targetEmployees = INITIAL_EMPLOYEES.filter(e => e.id === filterEmployeeId);
+        targetEmployees = employees.filter(e => e.id === filterEmployeeId);
     }
     return generateReportData(targetEmployees);
-  }, [filterEmployeeId]);
+  }, [filterEmployeeId, employees]);
 
   const totalBudget = data.reduce((acc, curr) => acc + curr.totalValue, 0);
   const totalHours = data.reduce((acc, curr) => acc + curr.totalHours, 0);

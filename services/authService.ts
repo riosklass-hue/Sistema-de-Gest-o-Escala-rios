@@ -1,7 +1,8 @@
 import { User } from "../types";
 
 // Mock Database of Users
-const MOCK_USERS: Record<string, User & { password: string }> = {
+// Changed to 'let' to allow runtime updates
+let MOCK_USERS: Record<string, User & { password: string }> = {
   'admin': {
     username: 'admin',
     password: '123', 
@@ -37,4 +38,20 @@ export const login = async (username: string, password: string): Promise<User | 
   }
   
   return null;
+};
+
+export const registerUser = async (user: User, password: string): Promise<boolean> => {
+  // Simulate network delay
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  if (MOCK_USERS[user.username]) {
+    return false; // User already exists
+  }
+
+  MOCK_USERS[user.username] = {
+    ...user,
+    password
+  };
+
+  return true;
 };

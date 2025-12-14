@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Employee, ShiftType, Schedule } from '../types';
-import { SHIFT_COLORS, INITIAL_EMPLOYEES } from '../constants';
-import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, Download } from 'lucide-react';
+import { SHIFT_COLORS } from '../constants';
+import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save } from 'lucide-react';
 import NeonCard from './NeonCard';
 import { generateSmartSchedule } from '../services/geminiService';
 
 interface ShiftCalendarProps {
     filterEmployeeId?: string | null;
+    employees: Employee[];
 }
 
-const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId }) => {
+const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employees }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+  // Removed local 'employees' state in favor of props
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
@@ -29,16 +30,23 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId }) => {
 
   const monthName = currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
 
-  // Initialize empty grid on mount if needed
+  // Sync schedules with employees list
   useEffect(() => {
-    if (schedules.length === 0) {
-      const initialSchedules = INITIAL_EMPLOYEES.map(emp => ({
-        employeeId: emp.id,
-        shifts: {}
-      }));
-      setSchedules(initialSchedules);
-    }
-  }, [schedules.length]);
+    setSchedules(prev => {
+        const newSchedules = [...prev];
+        
+        employees.forEach(emp => {
+            // Check if employee already has a schedule
+            if (!newSchedules.find(s => s.employeeId === emp.id)) {
+                newSchedules.push({
+                    employeeId: emp.id,
+                    shifts: {}
+                });
+            }
+        });
+        return newSchedules;
+    });
+  }, [employees]);
 
   const handleGenerateAI = async () => {
     setLoading(true);
@@ -89,19 +97,13 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId }) => {
   };
 
   const handleSave = () => {
-    // Create a robust filename
     const fileName = `escala_nexus_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.json`;
-    
-    // Convert state to JSON
     const dataToSave = {
         month: currentDate.getMonth() + 1,
         year: currentDate.getFullYear(),
         schedules: schedules
     };
-    
     const json = JSON.stringify(dataToSave, null, 2);
-    
-    // Create download link
     const blob = new Blob([json], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -110,8 +112,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId }) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    // Visual feedback could be added here, but the browser download is sufficient
   };
 
   const getShiftType = (empId: string, day: number): ShiftType | undefined => {
