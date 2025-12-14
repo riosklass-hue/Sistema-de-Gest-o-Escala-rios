@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Employee, ShiftType } from "../types";
+import { PORTO_VELHO_HOLIDAYS } from "../constants";
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -11,18 +12,25 @@ export const generateSmartSchedule = async (
 ): Promise<any[]> => {
   const modelId = "gemini-2.5-flash"; // Using Flash for speed/efficiency in logic tasks
   
+  // Identify holidays in the requested month for the prompt context
+  const monthPadded = String(month).padStart(2, '0');
+  const activeHolidays = PORTO_VELHO_HOLIDAYS
+    .filter(h => h.startsWith(monthPadded))
+    .map(h => `${h.split('-')[1]}/${monthPadded}`) // Format DD/MM
+    .join(', ');
+
   const prompt = `
-    Gere uma escala de trabalho realista para o mês ${month}/${year} para os seguintes funcionários:
+    Atue como um planejador de escalas experiente.
+    Gere uma escala de trabalho para o mês ${month}/${year} para os seguintes funcionários:
     ${employees.map(e => e.name).join(', ')}.
     
-    Regras:
-    1. Tipos de turno: T1 (Técnico), PLAN (Planejamento), FINAL (Final de Semana), OFF (Folga).
-    2. Distribua os turnos de forma equilibrada.
-    3. Nos finais de semana (Sábado e Domingo), use preferencialmente 'FINAL' ou 'OFF'.
-    4. Durante a semana, alterne entre 'T1' e 'PLAN'.
-    5. Cada funcionário deve ter pelo menos 8 folgas (OFF) no mês.
+    Regras de Negócio (Rígidas):
+    1. FINAIS DE SEMANA (Sábado e Domingo) e FERIADOS (${activeHolidays || 'Nenhum feriado neste mês'}) DEVEM ser preenchidos automaticamente com o tipo 'FINAL'.
+    2. Dias úteis devem ser preenchidos preferencialmente com 'T1' (Turno Técnico Padrão) ou 'Q1' (Turno Qualidade/Complementar).
+    3. Use 'PLAN' para dias administrativos/planejamento.
+    4. O tipo 'OFF' deve ser usado para folgas obrigatórias.
     
-    Retorne APENAS um JSON array onde cada objeto representa um funcionário e seus turnos.
+    Retorne APENAS um JSON array onde cada objeto representa um funcionário e seus turnos diários.
   `;
 
   try {
@@ -44,7 +52,7 @@ export const generateSmartSchedule = async (
                   type: Type.OBJECT,
                   properties: {
                     day: { type: Type.INTEGER },
-                    type: { type: Type.STRING, enum: ["T1", "PLAN", "FINAL", "OFF"] }
+                    type: { type: Type.STRING, enum: ["T1", "Q1", "PLAN", "FINAL", "OFF"] }
                   }
                 }
               }

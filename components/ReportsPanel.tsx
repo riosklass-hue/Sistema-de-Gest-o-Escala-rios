@@ -15,6 +15,7 @@ const RATES: Record<string, number> = {
 
 const SHIFT_HOURS = {
   'T1': 8,
+  'Q1': 8,
   'PLAN': 8,
   'FINAL': 12,
   'OFF': 0
@@ -24,11 +25,12 @@ const SHIFT_HOURS = {
 const generateReportData = (employees: Employee[]) => {
   return employees.map(emp => {
     // Simulação de turnos realizados no mês
-    const t1Count = Math.floor(Math.random() * 10) + 5;
+    const t1Count = Math.floor(Math.random() * 10) + 2;
+    const q1Count = Math.floor(Math.random() * 5);
     const planCount = Math.floor(Math.random() * 8) + 2;
     const finalCount = Math.floor(Math.random() * 3) + 1;
     
-    const totalHours = (t1Count * SHIFT_HOURS.T1) + (planCount * SHIFT_HOURS.PLAN) + (finalCount * SHIFT_HOURS.FINAL);
+    const totalHours = (t1Count * SHIFT_HOURS.T1) + (q1Count * SHIFT_HOURS.Q1) + (planCount * SHIFT_HOURS.PLAN) + (finalCount * SHIFT_HOURS.FINAL);
     const hourlyRate = RATES[emp.role] || 50;
     const baseValue = totalHours * hourlyRate;
     const bonus = finalCount * (hourlyRate * 0.5 * 12); // 50% extra no final de semana
@@ -37,6 +39,7 @@ const generateReportData = (employees: Employee[]) => {
     return {
       ...emp,
       t1Count,
+      q1Count,
       planCount,
       finalCount,
       totalHours,

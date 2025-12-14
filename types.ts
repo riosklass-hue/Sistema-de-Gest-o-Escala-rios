@@ -1,8 +1,9 @@
 export enum ShiftType {
-  T1 = 'T1',       // TÉCNICO (Technician)
-  PLAN = 'PLAN',   // PLANEJAMENTO (Planning)
-  FINAL = 'FINAL', // FINAL DE SEMANA (Weekend)
-  OFF = 'OFF'      // FOLGA (Day off)
+  T1 = 'T1',       // TÉCNICO (Technician) - VERDE
+  Q1 = 'Q1',       // TÉCNICO Q1 - AZUL
+  PLAN = 'PLAN',   // PLANEJAMENTO (Planning) - LARANJA
+  FINAL = 'FINAL', // FINAL DE SEMANA (Weekend) - BRANCO
+  OFF = 'OFF'      // FOLGA (Day off) - VERMELHO
 }
 
 export type UserRole = 'ADMIN' | 'TEACHER';

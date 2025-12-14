@@ -11,10 +11,11 @@ export const INITIAL_EMPLOYEES: Employee[] = [
 ];
 
 export const SHIFT_COLORS: Record<ShiftType, string> = {
-  [ShiftType.T1]: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.2)]',
-  [ShiftType.PLAN]: 'bg-orange-500/20 text-orange-300 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.2)]',
-  [ShiftType.FINAL]: 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]',
-  [ShiftType.OFF]: 'bg-slate-800/30 text-slate-500 border-slate-700/30',
+  [ShiftType.T1]: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]', // VERDE
+  [ShiftType.Q1]: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.2)]', // AZUL
+  [ShiftType.PLAN]: 'bg-orange-500/20 text-orange-300 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.2)]', // LARANJA
+  [ShiftType.FINAL]: 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.9)] font-bold', // BRANCO
+  [ShiftType.OFF]: 'bg-red-500/10 text-red-500 border-red-500/30 shadow-[0_0_5px_rgba(239,68,68,0.1)]', // VERMELHO
 };
 
 export const MENU_ITEMS = [

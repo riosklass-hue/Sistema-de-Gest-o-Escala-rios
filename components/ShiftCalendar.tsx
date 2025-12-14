@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Employee, ShiftType, Schedule, Shift } from '../types';
 import { SHIFT_COLORS, PORTO_VELHO_HOLIDAYS, SHIFT_SLOTS } from '../constants';
 import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, BookOpen, Calculator, CalendarDays, ArrowRight, Sun, Sunset, Moon, CheckSquare, Square } from 'lucide-react';
@@ -45,34 +45,13 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     ? employees.filter(e => e.id === filterEmployeeId)
     : employees;
 
-  // Helper to get days in month
-  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-
-  const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
   const monthName = currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
 
-  // Sync schedules with employees list
-  useEffect(() => {
-    setSchedules(prev => {
-        const newSchedules = [...prev];
-        
-        employees.forEach(emp => {
-            if (!newSchedules.find(s => s.employeeId === emp.id)) {
-                newSchedules.push({
-                    employeeId: emp.id,
-                    shifts: {}
-                });
-            }
-        });
-        return newSchedules;
-    });
-  }, [employees]);
+  // --- Helpers defined before useEffect ---
 
-  // --- Logic for Dates, Holidays and Workdays ---
+  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 
-  const isNonWorkingDay = (date: Date): boolean => {
+  const isNonWorkingDay = useCallback((date: Date): boolean => {
     const dayOfWeek = date.getDay(); // 0 = Sun, 6 = Sat
     if (dayOfWeek === 0 || dayOfWeek === 6) return true;
 
@@ -81,12 +60,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     const key = `${mm}-${dd}`;
 
     return PORTO_VELHO_HOLIDAYS.includes(key);
-  };
-
-  const parseDateStr = (dateStr: string): Date => {
-    const parts = dateStr.split('-');
-    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-  };
+  }, []);
 
   const formatDateStr = (date: Date): string => {
       const y = date.getFullYear();
@@ -95,7 +69,53 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       return `${y}-${m}-${d}`;
   };
 
-  // Calcula datas úteis necessárias para cobrir as horas (4h por dia por turno)
+  const parseDateStr = (dateStr: string): Date => {
+    const parts = dateStr.split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  };
+
+  // --- Automatic Schedule Initialization ---
+  useEffect(() => {
+    setSchedules(prev => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const daysInCurrentMonth = getDaysInMonth(year, month);
+        
+        const newSchedules = employees.map(emp => {
+            const existingSchedule = prev.find(s => s.employeeId === emp.id);
+            const shifts = existingSchedule ? { ...existingSchedule.shifts } : {};
+
+            for (let day = 1; day <= daysInCurrentMonth; day++) {
+                const dateObj = new Date(year, month, day);
+                const dateStr = formatDateStr(dateObj);
+
+                if (isNonWorkingDay(dateObj)) {
+                    shifts[dateStr] = {
+                        date: dateStr,
+                        type: ShiftType.FINAL,
+                        activeSlots: ['MORNING', 'AFTERNOON', 'NIGHT'],
+                        courseName: 'Final de Semana / Feriado'
+                    };
+                } else {
+                    if (!shifts[dateStr]) {
+                       // Keep empty for manual/AI filling
+                    }
+                }
+            }
+
+            return {
+                employeeId: emp.id,
+                shifts: shifts
+            };
+        });
+        
+        return newSchedules;
+    });
+  }, [employees, currentDate, isNonWorkingDay]);
+
+  const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
+  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
   const calculateWorkingDates = (startDateStr: string, totalHours: number): string[] => {
       if (!startDateStr) return [];
       if (totalHours <= 0) return [startDateStr];
@@ -134,11 +154,22 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                 
                 if (empAiData && empAiData.shifts) {
                      const shifts: Record<string, any> = {};
+                     const existingEmpShifts = prev.find(s => s.employeeId === emp.id)?.shifts || {};
+                     Object.assign(shifts, existingEmpShifts);
+
                      empAiData.shifts.forEach((s: any) => {
                         const dayStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(s.day).padStart(2, '0')}`;
-                        // AI default: assigns MORNING and AFTERNOON for T1, just MORNING for PLAN (example logic)
                         const type = s.type as ShiftType;
-                        const defaultSlots: ('MORNING'|'AFTERNOON'|'NIGHT')[] = type === ShiftType.T1 ? ['MORNING', 'AFTERNOON'] : ['MORNING'];
+                        
+                        let defaultSlots: ('MORNING'|'AFTERNOON'|'NIGHT')[] = [];
+                        
+                        if (type === ShiftType.FINAL) {
+                            defaultSlots = ['MORNING', 'AFTERNOON', 'NIGHT'];
+                        } else if (type === ShiftType.T1 || type === ShiftType.Q1) {
+                            defaultSlots = ['MORNING', 'AFTERNOON'];
+                        } else if (type === ShiftType.PLAN) {
+                            defaultSlots = ['MORNING'];
+                        }
                         
                         shifts[dayStr] = {
                            date: dayStr,
@@ -193,7 +224,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const existingShift = schedules.find(s => s.employeeId === empId)?.shifts[dateStr];
 
-    // Detect existing slots or default to empty
     const currentSlots = existingShift?.activeSlots || [];
 
     setEditingState({
@@ -232,17 +262,15 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
 
           const updatedShifts = { ...sch.shifts };
 
-          // Helper to add slot to a day
           const addSlotToDay = (dateStr: string, slot: 'MORNING' | 'AFTERNOON' | 'NIGHT') => {
               if (!updatedShifts[dateStr]) {
                   updatedShifts[dateStr] = {
                       date: dateStr,
-                      type: editingState.type, // Use the selected type for all generated days
+                      type: editingState.type, 
                       courseName: editingState.courseName,
                       activeSlots: []
                   };
               } else {
-                  // Update common props if overwriting
                   updatedShifts[dateStr].type = editingState.type;
                   updatedShifts[dateStr].courseName = editingState.courseName;
               }
@@ -254,27 +282,35 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
               updatedShifts[dateStr].activeSlots = slots;
           };
 
-          // 1. Process Morning
           if (editingState.slots.MORNING.active) {
               const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours || 4);
               dates.forEach(d => addSlotToDay(d, 'MORNING'));
           }
 
-          // 2. Process Afternoon
           if (editingState.slots.AFTERNOON.active) {
               const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours || 4);
               dates.forEach(d => addSlotToDay(d, 'AFTERNOON'));
           }
 
-          // 3. Process Night
           if (editingState.slots.NIGHT.active) {
               const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours || 4);
               dates.forEach(d => addSlotToDay(d, 'NIGHT'));
           }
-          
-          // If no slots are active (User unchecked everything on a day), we might want to set it to OFF or clear slots
-          // Current logic appends. If the user wants to clear, they would need to start fresh or we'd need a "Clear Range" feature.
-          // For now, this additive logic works for scheduling.
+
+          // Case: User selected OFF, we must create the record even if no slots active
+          if (editingState.type === ShiftType.OFF && 
+              !editingState.slots.MORNING.active && 
+              !editingState.slots.AFTERNOON.active && 
+              !editingState.slots.NIGHT.active) {
+                
+             const dateStr = editingState.baseDateStr;
+             updatedShifts[dateStr] = {
+                date: dateStr,
+                type: ShiftType.OFF,
+                courseName: 'Folga',
+                activeSlots: []
+             };
+          }
 
           return {
               ...sch,
@@ -290,7 +326,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       const currentSlotConfig = editingState.slots[slotName];
       let newConfig = { ...currentSlotConfig, [field]: value };
 
-      // Auto-calculate end date if start date or hours change
       if (field === 'startDateStr' || field === 'totalHours') {
           const startDate = field === 'startDateStr' ? value : currentSlotConfig.startDateStr;
           const hours = field === 'totalHours' ? Number(value) : currentSlotConfig.totalHours;
@@ -314,6 +349,18 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       updateSlotConfig(slotName, 'active', !editingState.slots[slotName].active);
   };
 
+  // Helper to determine slot color based on type
+  const getSlotColor = (type: ShiftType) => {
+      switch (type) {
+          case ShiftType.FINAL: return 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]'; // BRANCO
+          case ShiftType.T1: return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.6)]'; // VERDE (Novo)
+          case ShiftType.Q1: return 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]'; // AZUL (Novo)
+          case ShiftType.PLAN: return 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]'; // LARANJA
+          case ShiftType.OFF: return 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)]'; // VERMELHO
+          default: return 'bg-slate-700';
+      }
+  };
+
   return (
     <div className="flex flex-col gap-6 relative">
       
@@ -325,7 +372,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                       <div className="space-y-6">
                           
                           {/* Top: Shift Type Selector */}
-                          <div className="grid grid-cols-4 gap-2">
+                          <div className="grid grid-cols-5 gap-2">
                               {Object.values(ShiftType).map((type) => (
                                   <button
                                       key={type}
@@ -333,7 +380,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                       className={`
                                           p-2 rounded border text-xs font-bold transition-all
                                           ${editingState.type === type 
-                                              ? SHIFT_COLORS[type] + ' ring-2 ring-white/20' 
+                                              ? SHIFT_COLORS[type] + ' ring-2 ring-white/20 scale-105' 
                                               : 'bg-slate-900 border-white/10 text-slate-500 hover:bg-slate-800'}
                                       `}
                                   >
@@ -366,12 +413,12 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                               </div>
 
                               {/* Morning Row */}
-                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-cyan-500/5 border-cyan-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
                                   <div 
                                     className="flex items-center gap-2 cursor-pointer"
                                     onClick={() => toggleSlot('MORNING')}
                                   >
-                                      {editingState.slots.MORNING.active ? <CheckSquare size={16} className="text-cyan-400"/> : <Square size={16} className="text-slate-500"/>}
+                                      {editingState.slots.MORNING.active ? <CheckSquare size={16} className="text-emerald-400"/> : <Square size={16} className="text-slate-500"/>}
                                       <span className="font-bold text-sm text-white">Manhã</span>
                                   </div>
                                   <input 
@@ -389,7 +436,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                       placeholder="Hrs"
                                       className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
                                   />
-                                  <div className="text-right text-xs font-mono font-bold text-cyan-300">
+                                  <div className="text-right text-xs font-mono font-bold text-emerald-300">
                                       {editingState.slots.MORNING.active && editingState.slots.MORNING.endDateStr.split('-').reverse().join('/')}
                                   </div>
                               </div>
@@ -577,9 +624,11 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                     const hasAfternoon = shift?.activeSlots?.includes('AFTERNOON');
                     const hasNight = shift?.activeSlots?.includes('NIGHT');
                     
-                    // Determine styling based on if ANY slot is active vs OFF
                     const isOff = shiftType === ShiftType.OFF;
-                    const cellBg = isOff ? 'bg-slate-900/40' : '';
+                    const cellBg = isOff ? 'bg-red-500/10 border-red-500/20' : '';
+                    
+                    // Colors based on ShiftType
+                    const colorClass = getSlotColor(shiftType);
                     
                     return (
                       <td 
@@ -589,13 +638,13 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                       >
                          <div className="w-full h-10 flex flex-col justify-between py-0.5 gap-[1px]">
                            {/* Morning Slot Indicator */}
-                           <div className={`h-full w-full rounded-sm transition-all ${hasMorning ? 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]' : 'bg-slate-800/50'}`}></div>
+                           <div className={`h-full w-full rounded-sm transition-all ${hasMorning ? colorClass : 'bg-slate-800/50'}`}></div>
                            
                            {/* Afternoon Slot Indicator */}
-                           <div className={`h-full w-full rounded-sm transition-all ${hasAfternoon ? 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]' : 'bg-slate-800/50'}`}></div>
+                           <div className={`h-full w-full rounded-sm transition-all ${hasAfternoon ? colorClass : 'bg-slate-800/50'}`}></div>
                            
                            {/* Night Slot Indicator */}
-                           <div className={`h-full w-full rounded-sm transition-all ${hasNight ? 'bg-purple-500 shadow-[0_0_5px_rgba(168,85,247,0.6)]' : 'bg-slate-800/50'}`}></div>
+                           <div className={`h-full w-full rounded-sm transition-all ${hasNight ? colorClass : 'bg-slate-800/50'}`}></div>
                          </div>
                       </td>
                     );
@@ -610,16 +659,24 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       {/* Legend */}
       <div className="flex flex-wrap gap-6 px-4 items-center">
          <div className="flex items-center gap-2">
+             <div className="w-3 h-3 bg-emerald-500 rounded-sm shadow-[0_0_5px_rgba(16,185,129,0.6)]"></div>
+             <span className="text-xs text-slate-400 font-mono">T1 (Técnico - Verde)</span>
+         </div>
+         <div className="flex items-center gap-2">
              <div className="w-3 h-3 bg-cyan-500 rounded-sm shadow-[0_0_5px_rgba(6,182,212,0.6)]"></div>
-             <span className="text-xs text-slate-400 font-mono">Manhã (07:30-11:30)</span>
+             <span className="text-xs text-slate-400 font-mono">Q1 (Qualidade/TI - Azul)</span>
          </div>
          <div className="flex items-center gap-2">
              <div className="w-3 h-3 bg-orange-500 rounded-sm shadow-[0_0_5px_rgba(249,115,22,0.6)]"></div>
-             <span className="text-xs text-slate-400 font-mono">Tarde (13:30-17:30)</span>
+             <span className="text-xs text-slate-400 font-mono">PLAN (Planejamento - Laranja)</span>
          </div>
          <div className="flex items-center gap-2">
-             <div className="w-3 h-3 bg-purple-500 rounded-sm shadow-[0_0_5px_rgba(168,85,247,0.6)]"></div>
-             <span className="text-xs text-slate-400 font-mono">Noite (18:30-22:30)</span>
+             <div className="w-3 h-3 bg-red-500 rounded-sm shadow-[0_0_5px_rgba(239,68,68,0.6)]"></div>
+             <span className="text-xs text-slate-400 font-mono">FOLGA (Vermelho)</span>
+         </div>
+         <div className="flex items-center gap-2 border-l border-white/10 pl-6">
+             <div className="w-3 h-3 bg-white rounded-sm shadow-[0_0_5px_rgba(255,255,255,0.8)]"></div>
+             <span className="text-xs text-slate-300 font-mono font-bold">FINAL (Sáb/Dom/Feriado)</span>
          </div>
       </div>
     </div>
