@@ -97,7 +97,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
   };
 
   const handleSave = () => {
-    const fileName = `escala_nexus_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.json`;
+    const fileName = `escala_rios_${currentDate.getFullYear()}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.json`;
     const dataToSave = {
         month: currentDate.getMonth() + 1,
         year: currentDate.getFullYear(),

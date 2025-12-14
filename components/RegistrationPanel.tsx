@@ -81,7 +81,7 @@ const RegistrationPanel: React.FC<RegistrationPanelProps> = ({ onRegisterEmploye
                 <UserPlus className="text-cyan-400" />
                 Novo Cadastro
             </h2>
-            <p className="text-slate-400">Adicione novos administradores ou membros da equipe ao sistema Nexus.</p>
+            <p className="text-slate-400">Adicione novos administradores ou membros da equipe ao sistema Rios.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -51,7 +51,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         <div className="absolute inset-0 bg-cyan-500/30 blur-xl rounded-full"></div>
                         <Hexagon className="text-cyan-400 w-12 h-12 relative z-10 animate-spin-slow" />
                     </div>
-                    <h1 className="text-3xl font-bold text-white font-mono tracking-wider">S.G.E. NEXUS</h1>
+                    <h1 className="text-3xl font-bold text-white font-mono tracking-wider">S.G.E. RIOS</h1>
                     <p className="text-slate-400 text-sm mt-2">Identifique-se para prosseguir</p>
                 </div>
 

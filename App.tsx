@@ -24,16 +24,16 @@ const App: React.FC = () => {
     // Update ticker message based on active tab
     if (activeTab === 'Escalas') {
       setInsight(currentUser.role === 'ADMIN' 
-        ? "S.G.E. Nexus: Modo Administrador. Gestão completa de escalas." 
-        : `S.G.E. Nexus: Bem-vindo(a) ${currentUser.name}. Visualizando escala individual.`);
+        ? "S.G.E. Rios: Modo Administrador. Gestão completa de escalas." 
+        : `S.G.E. Rios: Bem-vindo(a) ${currentUser.name}. Visualizando escala individual.`);
     } else if (activeTab === 'Dashboard') {
-      setInsight("S.G.E. Nexus: Visualizando métricas de desempenho.");
+      setInsight("S.G.E. Rios: Visualizando métricas de desempenho.");
     } else if (activeTab === 'Relatórios') {
-        setInsight("S.G.E. Nexus: Processando dados financeiros e volumetria de horas.");
+        setInsight("S.G.E. Rios: Processando dados financeiros e volumetria de horas.");
     } else if (activeTab === 'Cadastro') {
-        setInsight("S.G.E. Nexus: Módulo de registro de novos usuários e colaboradores.");
+        setInsight("S.G.E. Rios: Módulo de registro de novos usuários e colaboradores.");
     } else {
-      setInsight(`S.G.E. Nexus: Acesso ao módulo ${activeTab} restrito.`);
+      setInsight(`S.G.E. Rios: Acesso ao módulo ${activeTab} restrito.`);
     }
   }, [activeTab, currentUser]);
 
@@ -90,7 +90,7 @@ const App: React.FC = () => {
           <div>
             <div className="h-16 flex items-center justify-center border-b border-white/10">
               <Hexagon className="text-cyan-400 w-8 h-8 animate-spin-slow" />
-              {isSidebarOpen && <span className="ml-3 font-mono font-bold text-lg tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">NEXUS</span>}
+              {isSidebarOpen && <span className="ml-3 font-mono font-bold text-lg tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">RIOS</span>}
             </div>
             
             <nav className="p-4 space-y-2">

@@ -6,7 +6,7 @@ let MOCK_USERS: Record<string, User & { password: string }> = {
   'admin': {
     username: 'admin',
     password: '123', 
-    name: 'Administrador Nexus',
+    name: 'Administrador Rios',
     role: 'ADMIN'
   },
   'professor': {
