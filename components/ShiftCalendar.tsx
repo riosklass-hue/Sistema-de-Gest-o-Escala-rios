@@ -18,13 +18,14 @@ interface SlotConfig {
     startDateStr: string;
     totalHours: number;
     endDateStr: string; // Calculada
+    courseName: string; // Novo campo específico por turno
 }
 
 interface EditingShiftState {
     employeeId: string;
     baseDateStr: string; // A data que foi clicada (referência)
     type: ShiftType;
-    courseName: string;
+    // courseName removido do global e movido para slots
     
     // Configurações independentes para cada turno
     slots: {
@@ -101,8 +102,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
             const dateStr = formatDateStr(dateObj);
 
             // AUTO-FILL LOGIC: 
-            // Only auto-fill if the slot is completely EMPTY.
-            // This prevents overwriting manual edits (like user changing a Saturday to T1).
             if (!shifts[dateStr]) {
                 if (isNonWorkingDay(dateObj)) {
                     shifts[dateStr] = {
@@ -122,8 +121,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     });
     
     setSchedules(newSchedules);
-    // We intentionally do not depend on 'schedules' here to avoid infinite loops, 
-    // but we depend on 'currentSchedules' so if parent updates, we update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employees, currentDate, isNonWorkingDay, currentSchedules]); 
 
@@ -210,12 +207,9 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
   };
 
   const handleSaveSystem = () => {
-    // 1. Save to App State for Reports
     if (onSave) {
         onSave(schedules);
     }
-    
-    // 2. Feedback
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
@@ -232,30 +226,37 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
     const existingShift = schedules.find(s => s.employeeId === empId)?.shifts[dateStr];
 
     const currentSlots = existingShift?.activeSlots || [];
+    
+    // Helper to get course for a specific slot, falling back to general courseName
+    const getCourse = (slot: string) => {
+        return existingShift?.slotDetails?.[slot]?.courseName || existingShift?.courseName || '';
+    };
 
     setEditingState({
         employeeId: empId,
         baseDateStr: dateStr,
         type: existingShift?.type || ShiftType.T1,
-        courseName: existingShift?.courseName || '',
         slots: {
             MORNING: {
                 active: currentSlots.includes('MORNING'),
                 startDateStr: dateStr,
                 totalHours: 0,
-                endDateStr: dateStr
+                endDateStr: dateStr,
+                courseName: getCourse('MORNING')
             },
             AFTERNOON: {
                 active: currentSlots.includes('AFTERNOON'),
                 startDateStr: dateStr,
                 totalHours: 0,
-                endDateStr: dateStr
+                endDateStr: dateStr,
+                courseName: getCourse('AFTERNOON')
             },
             NIGHT: {
                 active: currentSlots.includes('NIGHT'),
                 startDateStr: dateStr,
                 totalHours: 0,
-                endDateStr: dateStr
+                endDateStr: dateStr,
+                courseName: getCourse('NIGHT')
             }
         }
     });
@@ -269,17 +270,17 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
 
           const updatedShifts = { ...sch.shifts };
 
-          const addSlotToDay = (dateStr: string, slot: 'MORNING' | 'AFTERNOON' | 'NIGHT') => {
+          // Function to apply slot data to a specific date
+          const addSlotToDay = (dateStr: string, slot: 'MORNING' | 'AFTERNOON' | 'NIGHT', courseName: string) => {
               if (!updatedShifts[dateStr]) {
                   updatedShifts[dateStr] = {
                       date: dateStr,
                       type: editingState.type, 
-                      courseName: editingState.courseName,
-                      activeSlots: []
+                      activeSlots: [],
+                      slotDetails: {}
                   };
               } else {
                   updatedShifts[dateStr].type = editingState.type;
-                  updatedShifts[dateStr].courseName = editingState.courseName;
               }
               
               const slots = updatedShifts[dateStr].activeSlots || [];
@@ -287,51 +288,62 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                   slots.push(slot);
               }
               updatedShifts[dateStr].activeSlots = slots;
+
+              // Save specific course details
+              updatedShifts[dateStr].slotDetails = {
+                  ...updatedShifts[dateStr].slotDetails,
+                  [slot]: { courseName }
+              };
+
+              // Update legacy/summary courseName (optional, just to show something)
+              updatedShifts[dateStr].courseName = courseName; 
           };
 
-          // --- FIX: Strictly set slots for the base date first ---
-          // This ensures that if I uncheck a box for the day I clicked, it actually removes it.
-          // We reset the activeSlots for the baseDateStr and rebuild them based on the checkboxes.
+          // Reset logic for the base date (handle unchecking)
           const baseDate = editingState.baseDateStr;
-          
-          // Initialise or get object
           if (!updatedShifts[baseDate]) {
               updatedShifts[baseDate] = {
                   date: baseDate,
                   type: editingState.type,
-                  courseName: editingState.courseName,
-                  activeSlots: []
+                  activeSlots: [],
+                  slotDetails: {}
               };
           } else {
               updatedShifts[baseDate].type = editingState.type;
-              updatedShifts[baseDate].courseName = editingState.courseName;
-              // Clear slots to ensure we respect unchecking
               updatedShifts[baseDate].activeSlots = []; 
+              updatedShifts[baseDate].slotDetails = {}; // Clear details
           }
 
-          // Rebuild for base day
-          if (editingState.slots.MORNING.active) updatedShifts[baseDate].activeSlots?.push('MORNING');
-          if (editingState.slots.AFTERNOON.active) updatedShifts[baseDate].activeSlots?.push('AFTERNOON');
-          if (editingState.slots.NIGHT.active) updatedShifts[baseDate].activeSlots?.push('NIGHT');
-
-
-          // --- Handle Multi-Day logic (Courses) additive ---
-          // If totalHours > 4, it means it spans multiple days. We add slots to subsequent days.
-          
-          if (editingState.slots.MORNING.active && editingState.slots.MORNING.totalHours > 4) {
-              const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours);
-              // Filter out baseDate to not duplicate/mess up logic above
-              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'MORNING'));
+          // Process Morning
+          if (editingState.slots.MORNING.active) {
+              // Add to base day
+              addSlotToDay(baseDate, 'MORNING', editingState.slots.MORNING.courseName);
+              
+              // Add to subsequent days if duration > 4h
+              if (editingState.slots.MORNING.totalHours > 4) {
+                  const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours);
+                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'MORNING', editingState.slots.MORNING.courseName));
+              }
           }
 
-          if (editingState.slots.AFTERNOON.active && editingState.slots.AFTERNOON.totalHours > 4) {
-              const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours);
-              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'AFTERNOON'));
+          // Process Afternoon
+          if (editingState.slots.AFTERNOON.active) {
+              addSlotToDay(baseDate, 'AFTERNOON', editingState.slots.AFTERNOON.courseName);
+
+              if (editingState.slots.AFTERNOON.totalHours > 4) {
+                  const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours);
+                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'AFTERNOON', editingState.slots.AFTERNOON.courseName));
+              }
           }
 
-          if (editingState.slots.NIGHT.active && editingState.slots.NIGHT.totalHours > 4) {
-              const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours);
-              dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'NIGHT'));
+          // Process Night
+          if (editingState.slots.NIGHT.active) {
+              addSlotToDay(baseDate, 'NIGHT', editingState.slots.NIGHT.courseName);
+
+              if (editingState.slots.NIGHT.totalHours > 4) {
+                  const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours);
+                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'NIGHT', editingState.slots.NIGHT.courseName));
+              }
           }
 
           // Case: User selected OFF
@@ -381,14 +393,13 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       updateSlotConfig(slotName, 'active', !editingState.slots[slotName].active);
   };
 
-  // Helper to determine slot color based on type
   const getSlotColor = (type: ShiftType) => {
       switch (type) {
-          case ShiftType.FINAL: return 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]'; // BRANCO
-          case ShiftType.T1: return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.6)]'; // VERDE (Novo)
-          case ShiftType.Q1: return 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]'; // AZUL (Novo)
-          case ShiftType.PLAN: return 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]'; // LARANJA
-          case ShiftType.OFF: return 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)]'; // VERMELHO
+          case ShiftType.FINAL: return 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]';
+          case ShiftType.T1: return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.6)]';
+          case ShiftType.Q1: return 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]';
+          case ShiftType.PLAN: return 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]';
+          case ShiftType.OFF: return 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)]';
           default: return 'bg-slate-700';
       }
   };
@@ -399,8 +410,8 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       {/* Modal Overlay */}
       {editingState && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-              <div className="w-full max-w-2xl mx-4">
-                  <NeonCard glowColor="cyan" className="shadow-2xl" title="Gestão de Turnos & Escala">
+              <div className="w-full max-w-4xl mx-4">
+                  <NeonCard glowColor="cyan" className="shadow-2xl" title="Gestão de Turnos & Atividades">
                       <div className="space-y-6">
                           
                           {/* Top: Shift Type Selector */}
@@ -421,31 +432,18 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                               ))}
                           </div>
 
-                          <div className="space-y-2">
-                              <label className="text-xs font-mono uppercase text-slate-400 flex items-center gap-2">
-                                  <BookOpen size={14} className="text-cyan-400" />
-                                  Nome do Curso / Atividade
-                              </label>
-                              <input 
-                                  type="text"
-                                  value={editingState.courseName}
-                                  onChange={(e) => setEditingState({...editingState, courseName: e.target.value})}
-                                  placeholder="Ex: Treinamento NR-10"
-                                  className="w-full bg-slate-950 border border-white/10 rounded p-3 text-white focus:border-cyan-500 focus:outline-none focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all"
-                              />
-                          </div>
-
                           {/* Multi-Shift Configuration Grid */}
                           <div className="space-y-3">
-                              <div className="flex items-center gap-2 text-xs font-mono uppercase text-slate-500 pb-1 border-b border-white/10">
-                                  <span className="w-24">Turno</span>
-                                  <span className="flex-1">Início da Escala</span>
-                                  <span className="w-24">Carga (h)</span>
-                                  <span className="flex-1 text-right">Fim Previsto</span>
+                              <div className="grid grid-cols-[90px_105px_60px_90px_1fr] gap-3 items-center text-xs font-mono uppercase text-slate-500 pb-1 border-b border-white/10">
+                                  <span>Turno</span>
+                                  <span>Início</span>
+                                  <span>Carga</span>
+                                  <span className="text-right">Fim Prev.</span>
+                                  <span>Nome do Curso / Atividade</span>
                               </div>
 
                               {/* Morning Row */}
-                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
                                   <div 
                                     className="flex items-center gap-2 cursor-pointer"
                                     onClick={() => toggleSlot('MORNING')}
@@ -458,7 +456,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                       value={editingState.slots.MORNING.startDateStr}
                                       disabled={!editingState.slots.MORNING.active}
                                       onChange={(e) => updateSlotConfig('MORNING', 'startDateStr', e.target.value)}
-                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
                                   />
                                   <input 
                                       type="number" step="4" min="0"
@@ -471,10 +469,20 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                   <div className="text-right text-xs font-mono font-bold text-emerald-300">
                                       {editingState.slots.MORNING.active && editingState.slots.MORNING.endDateStr.split('-').reverse().join('/')}
                                   </div>
+                                  <div className="relative">
+                                      <input 
+                                          type="text"
+                                          disabled={!editingState.slots.MORNING.active}
+                                          value={editingState.slots.MORNING.courseName}
+                                          onChange={(e) => updateSlotConfig('MORNING', 'courseName', e.target.value)}
+                                          placeholder="Ex: NR-10 Manhã"
+                                          className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none disabled:opacity-30"
+                                      />
+                                  </div>
                               </div>
 
                               {/* Afternoon Row */}
-                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.AFTERNOON.active ? 'bg-orange-500/5 border-orange-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.AFTERNOON.active ? 'bg-orange-500/5 border-orange-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
                                   <div 
                                     className="flex items-center gap-2 cursor-pointer"
                                     onClick={() => toggleSlot('AFTERNOON')}
@@ -487,7 +495,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                       value={editingState.slots.AFTERNOON.startDateStr}
                                       disabled={!editingState.slots.AFTERNOON.active}
                                       onChange={(e) => updateSlotConfig('AFTERNOON', 'startDateStr', e.target.value)}
-                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
                                   />
                                   <input 
                                       type="number" step="4" min="0"
@@ -500,10 +508,20 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                   <div className="text-right text-xs font-mono font-bold text-orange-300">
                                       {editingState.slots.AFTERNOON.active && editingState.slots.AFTERNOON.endDateStr.split('-').reverse().join('/')}
                                   </div>
+                                   <div className="relative">
+                                      <input 
+                                          type="text"
+                                          disabled={!editingState.slots.AFTERNOON.active}
+                                          value={editingState.slots.AFTERNOON.courseName}
+                                          onChange={(e) => updateSlotConfig('AFTERNOON', 'courseName', e.target.value)}
+                                          placeholder="Ex: NR-35 Tarde"
+                                          className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-orange-500 focus:outline-none disabled:opacity-30"
+                                      />
+                                  </div>
                               </div>
 
                               {/* Night Row */}
-                              <div className={`grid grid-cols-[100px_1fr_90px_1fr] items-center gap-4 p-3 rounded-lg border transition-all ${editingState.slots.NIGHT.active ? 'bg-purple-500/5 border-purple-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
+                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.NIGHT.active ? 'bg-purple-500/5 border-purple-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
                                   <div 
                                     className="flex items-center gap-2 cursor-pointer"
                                     onClick={() => toggleSlot('NIGHT')}
@@ -516,7 +534,7 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                       value={editingState.slots.NIGHT.startDateStr}
                                       disabled={!editingState.slots.NIGHT.active}
                                       onChange={(e) => updateSlotConfig('NIGHT', 'startDateStr', e.target.value)}
-                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30"
+                                      className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full"
                                   />
                                   <input 
                                       type="number" step="4" min="0"
@@ -528,6 +546,16 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
                                   />
                                   <div className="text-right text-xs font-mono font-bold text-purple-300">
                                       {editingState.slots.NIGHT.active && editingState.slots.NIGHT.endDateStr.split('-').reverse().join('/')}
+                                  </div>
+                                   <div className="relative">
+                                      <input 
+                                          type="text"
+                                          disabled={!editingState.slots.NIGHT.active}
+                                          value={editingState.slots.NIGHT.courseName}
+                                          onChange={(e) => updateSlotConfig('NIGHT', 'courseName', e.target.value)}
+                                          placeholder="Ex: Supervisão Noite"
+                                          className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-purple-500 focus:outline-none disabled:opacity-30"
+                                      />
                                   </div>
                               </div>
                           </div>

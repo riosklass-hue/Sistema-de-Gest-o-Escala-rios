@@ -1,8 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, Cell } from 'recharts';
 import NeonCard from './NeonCard';
 import { Employee, Schedule, ShiftType } from '../types';
-import { DollarSign, Clock, TrendingUp, Wallet, Download, Activity, Database } from 'lucide-react';
+import { DollarSign, Clock, TrendingUp, Wallet, Download, Activity, Database, FileText, Calendar, ListFilter, Users, Filter } from 'lucide-react';
 
 // Configuração de Valores (Simulação de Regras de Negócio)
 const RATES: Record<string, number> = {
@@ -20,19 +20,22 @@ interface ReportsPanelProps {
 }
 
 const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees, schedules }) => {
+  const [internalFilterId, setInternalFilterId] = useState<string>('ALL');
+
+  // Determina qual filtro usar: O obrigatório (props) ou o selecionado (state)
+  const activeFilterId = filterEmployeeId || (internalFilterId === 'ALL' ? null : internalFilterId);
   
+  // 1. Dados Agregados (Financeiro e Horas Totais)
   const data = useMemo(() => {
     let targetEmployees = employees;
-    if (filterEmployeeId) {
-        targetEmployees = employees.filter(e => e.id === filterEmployeeId);
+    if (activeFilterId) {
+        targetEmployees = employees.filter(e => e.id === activeFilterId);
     }
 
     return targetEmployees.map(emp => {
-        // Encontrar escala do funcionário
         const empSchedule = schedules.find(s => s.employeeId === emp.id);
         const shifts = empSchedule ? Object.values(empSchedule.shifts) : [];
 
-        // Calcular contadores reais
         let t1Count = 0;
         let q1Count = 0;
         let planCount = 0;
@@ -41,26 +44,36 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
         const activitiesSet = new Set<string>();
 
         shifts.forEach(shift => {
-             // Contagem de tipos
              if (shift.type === ShiftType.T1) t1Count++;
              else if (shift.type === ShiftType.Q1) q1Count++;
              else if (shift.type === ShiftType.PLAN) planCount++;
              else if (shift.type === ShiftType.FINAL) finalCount++;
 
-             // Cálculo de horas (4h por slot ativo)
              const slots = shift.activeSlots || [];
              totalHours += (slots.length * 4);
 
-             // Coletar atividades (excluindo vazios ou "Final de Semana")
-             if (shift.courseName && shift.type !== ShiftType.FINAL && shift.type !== ShiftType.OFF) {
-                 activitiesSet.add(shift.courseName);
+             if (shift.type !== ShiftType.FINAL && shift.type !== ShiftType.OFF) {
+                 // Prioridade: Detalhe Específico do Slot
+                 if (shift.slotDetails) {
+                     Object.values(shift.slotDetails).forEach(detail => {
+                         if (detail.courseName && detail.courseName.trim() !== '') {
+                             activitiesSet.add(detail.courseName);
+                         }
+                     });
+                 }
+                 
+                 // Fallback: Nome Genérico
+                 if (shift.courseName && shift.courseName.trim() !== '') {
+                     if (!Array.from(activitiesSet).includes(shift.courseName)) {
+                        activitiesSet.add(shift.courseName);
+                     }
+                 }
              }
         });
 
-        // Cálculos financeiros
         const hourlyRate = RATES[emp.role] || 50;
         const baseValue = totalHours * hourlyRate;
-        const bonus = finalCount * (hourlyRate * 0.5 * 12); // Exemplo de bônus
+        const bonus = finalCount * (hourlyRate * 0.5 * 12); 
         const totalValue = baseValue + bonus;
 
         return {
@@ -72,11 +85,76 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
             totalHours,
             hourlyRate,
             totalValue,
-            efficiency: totalHours > 0 ? Math.floor(Math.random() * 10) + 90 : 0, // Mock efficiency if active
-            recentActivities: Array.from(activitiesSet).slice(0, 3) // Top 3 activities
+            efficiency: totalHours > 0 ? Math.floor(Math.random() * 10) + 90 : 0,
+            recentActivities: Array.from(activitiesSet).slice(0, 5)
         };
     });
-  }, [filterEmployeeId, employees, schedules]);
+  }, [activeFilterId, employees, schedules]);
+
+  // 2. Dados Detalhados por Turno (Novo Relatório)
+  const detailedActivities = useMemo(() => {
+    const list: any[] = [];
+    const targetEmployees = activeFilterId 
+        ? employees.filter(e => e.id === activeFilterId) 
+        : employees;
+
+    targetEmployees.forEach(emp => {
+        const sch = schedules.find(s => s.employeeId === emp.id);
+        if (!sch) return;
+
+        // Ordenar datas
+        const sortedDates = Object.keys(sch.shifts).sort();
+
+        sortedDates.forEach(dateStr => {
+            const shift = sch.shifts[dateStr];
+            
+            // Ignorar se não tiver slots ativos ou for folga total
+            if (!shift.activeSlots || shift.activeSlots.length === 0) return;
+
+            shift.activeSlots.forEach(slotKey => {
+                // Recuperar nome do curso específico do slot
+                const detail = shift.slotDetails?.[slotKey];
+                
+                let courseName = detail?.courseName;
+
+                if (!courseName || courseName.trim() === '') {
+                    courseName = shift.courseName;
+                }
+
+                if (!courseName || courseName.trim() === '') {
+                    courseName = `Atividade Padrão (${shift.type})`; 
+                }
+
+                // Formatar labels
+                let slotLabel = '';
+                let slotColor = '';
+                
+                if (slotKey === 'MORNING') { slotLabel = 'Manhã (07:30 - 11:30)'; slotColor = 'text-emerald-400'; }
+                else if (slotKey === 'AFTERNOON') { slotLabel = 'Tarde (13:30 - 17:30)'; slotColor = 'text-orange-400'; }
+                else if (slotKey === 'NIGHT') { slotLabel = 'Noite (18:30 - 22:30)'; slotColor = 'text-purple-400'; }
+
+                list.push({
+                    id: `${emp.id}-${dateStr}-${slotKey}`,
+                    date: dateStr.split('-').reverse().join('/'), // DD/MM/YYYY
+                    rawDate: dateStr,
+                    empName: emp.name,
+                    empAvatar: emp.avatarUrl,
+                    empRole: emp.role,
+                    slotLabel,
+                    slotColor,
+                    courseName, 
+                    hours: 4
+                });
+            });
+        });
+    });
+    
+    // Ordenar final: Data ASC -> Colaborador -> Turno
+    return list.sort((a, b) => {
+        if (a.rawDate !== b.rawDate) return a.rawDate.localeCompare(b.rawDate);
+        return a.empName.localeCompare(b.empName);
+    });
+  }, [activeFilterId, employees, schedules]);
 
   const totalBudget = data.reduce((acc, curr) => acc + curr.totalValue, 0);
   const totalHours = data.reduce((acc, curr) => acc + curr.totalHours, 0);
@@ -101,12 +179,39 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
+      {/* Filter Bar - Only visible if user is ADMIN (no fixed filter prop) */}
+      {!filterEmployeeId && (
+        <div className="flex justify-between items-center bg-sci-panel/40 p-4 rounded-xl border border-white/5 backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-slate-400 text-sm">
+                <Filter size={16} className="text-cyan-400" />
+                <span className="font-mono uppercase tracking-wider">Filtros de Visualização</span>
+            </div>
+            <div className="relative group">
+                <Users className="absolute left-3 top-2.5 text-slate-500 w-4 h-4 group-hover:text-cyan-400 transition-colors" />
+                <select 
+                    value={internalFilterId}
+                    onChange={(e) => setInternalFilterId(e.target.value)}
+                    className="pl-10 pr-4 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50 appearance-none min-w-[250px] cursor-pointer hover:bg-slate-800 transition-colors"
+                >
+                    <option value="ALL">Todos os Colaboradores</option>
+                    {employees.map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name} - {emp.role}</option>
+                    ))}
+                </select>
+                {/* Custom arrow indicator */}
+                <div className="absolute right-3 top-3 pointer-events-none">
+                    <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-slate-400"></div>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <NeonCard glowColor="cyan" className="flex items-center justify-between">
           <div>
             <p className="text-slate-400 text-xs font-mono uppercase mb-1">
-                {filterEmployeeId ? 'Projeção de Ganhos' : 'Custo Total Projetado'}
+                {activeFilterId ? 'Projeção de Ganhos (Filtrado)' : 'Custo Total Projetado'}
             </p>
             <h3 className="text-2xl font-bold text-cyan-400 font-mono">{formatCurrency(totalBudget)}</h3>
           </div>
@@ -183,15 +288,74 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
         </NeonCard>
       </div>
 
-      {/* Detailed Table */}
-      <NeonCard title="Detalhamento Financeiro e Atividades" glowColor="none" icon={<Wallet size={16} />}>
+      {/* NEW: Detailed Course/Shift Report */}
+      <NeonCard title="Relatório Analítico de Atividades (Cursos & Turnos)" glowColor="cyan" icon={<ListFilter size={16} />}>
+        <div className="max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 bg-sci-panel/95 backdrop-blur z-10">
+              <tr className="border-b border-white/10 text-xs text-slate-500 font-mono uppercase">
+                <th className="p-3 w-32">Data</th>
+                <th className="p-3">Colaborador</th>
+                <th className="p-3 w-48">Turno</th>
+                <th className="p-3">Curso / Atividade</th>
+                <th className="p-3 text-center">Carga</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detailedActivities.length > 0 ? (
+                  detailedActivities.map((row) => (
+                    <tr key={row.id} className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+                      <td className="p-3 text-slate-400 font-mono text-xs">
+                          <div className="flex items-center gap-2">
+                             <Calendar size={12} />
+                             {row.date}
+                          </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                            <img src={row.empAvatar} className="w-6 h-6 rounded-full border border-slate-600" alt="" />
+                            <span className="text-sm font-semibold text-slate-200">{row.empName}</span>
+                        </div>
+                      </td>
+                      <td className={`p-3 text-xs font-bold ${row.slotColor}`}>
+                          {row.slotLabel}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                            <FileText size={14} className="text-slate-500" />
+                            <span className="text-sm text-white group-hover:text-cyan-300 transition-colors">
+                                {row.courseName}
+                            </span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-center text-xs font-mono text-slate-500">
+                          {row.hours}h
+                      </td>
+                    </tr>
+                  ))
+              ) : (
+                  <tr>
+                      <td colSpan={5} className="p-8 text-center text-slate-500 italic">
+                          {activeFilterId 
+                              ? "Nenhuma atividade encontrada para este colaborador."
+                              : "Nenhuma atividade registrada no período selecionado."}
+                      </td>
+                  </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </NeonCard>
+
+      {/* Original Aggregated Table */}
+      <NeonCard title="Resumo Financeiro Consolidado" glowColor="none" icon={<Wallet size={16} />}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-white/10 text-xs text-slate-500 font-mono uppercase">
                 <th className="p-4">Colaborador</th>
-                <th className="p-4">Atividades Recentes</th>
-                <th className="p-4 text-center">Horas</th>
+                <th className="p-4">Resumo de Atividades</th>
+                <th className="p-4 text-center">Horas Totais</th>
                 <th className="p-4 text-right">Valor Bruto</th>
                 <th className="p-4 text-center">Ações</th>
               </tr>
