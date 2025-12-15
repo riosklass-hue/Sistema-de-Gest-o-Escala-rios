@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, Cell } from 'recharts';
 import NeonCard from './NeonCard';
-import { Employee, Schedule, ShiftType } from '../types';
+import { Employee, Schedule, ShiftType, Shift } from '../types';
 import { DollarSign, Clock, TrendingUp, Wallet, Download, Activity, Database, FileText, Calendar, ListFilter, Users, Filter } from 'lucide-react';
 
 // Configuração de Valores (Simulação de Regras de Negócio)
@@ -34,7 +34,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
 
     return targetEmployees.map(emp => {
         const empSchedule = schedules.find(s => s.employeeId === emp.id);
-        const shifts = empSchedule ? Object.values(empSchedule.shifts) : [];
+        const shifts: Shift[] = empSchedule ? Object.values(empSchedule.shifts) : [];
 
         let t1Count = 0;
         let q1Count = 0;
@@ -55,7 +55,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({ filterEmployeeId, employees
              if (shift.type !== ShiftType.FINAL && shift.type !== ShiftType.OFF) {
                  // Prioridade: Detalhe Específico do Slot
                  if (shift.slotDetails) {
-                     Object.values(shift.slotDetails).forEach(detail => {
+                     Object.values(shift.slotDetails).forEach((detail: any) => {
                          if (detail.courseName && detail.courseName.trim() !== '') {
                              activitiesSet.add(detail.courseName);
                          }

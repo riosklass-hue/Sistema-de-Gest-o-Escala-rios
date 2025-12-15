@@ -1,3 +1,4 @@
+
 export enum ShiftType {
   T1 = 'T1',       // TÉCNICO (Technician) - VERDE
   Q1 = 'Q1',       // TÉCNICO Q1 - AZUL
@@ -18,6 +19,8 @@ export interface User {
 export interface Employee {
   id: string;
   name: string;
+  email?: string;
+  phone?: string;
   role: string;
   avatarUrl: string;
 }
