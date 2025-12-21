@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Employee, ShiftType } from "../types";
 import { PORTO_VELHO_HOLIDAYS } from "../constants";
@@ -10,7 +11,8 @@ export const generateSmartSchedule = async (
   year: number,
   month: number
 ): Promise<any[]> => {
-  const modelId = "gemini-2.5-flash"; // Using Flash for speed/efficiency in logic tasks
+  // Use gemini-3-flash-preview for basic text and logic tasks as per coding guidelines
+  const modelId = "gemini-3-flash-preview"; 
   
   // Identify holidays in the requested month for the prompt context
   const monthPadded = String(month).padStart(2, '0');
@@ -74,7 +76,8 @@ export const generateSmartSchedule = async (
 };
 
 export const analyzeScheduleInsights = async (scheduleData: any): Promise<string> => {
-    const modelId = "gemini-2.5-flash";
+    // Use gemini-3-flash-preview for general text tasks like analysis
+    const modelId = "gemini-3-flash-preview";
     try {
         const response = await ai.models.generateContent({
             model: modelId,

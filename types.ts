@@ -23,6 +23,7 @@ export interface Employee {
   phone?: string;
   role: string;
   avatarUrl: string;
+  active: boolean; // Novo campo para status ativo/inativo
 }
 
 export interface Shift {

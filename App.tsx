@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ShiftCalendar from './components/ShiftCalendar';
 import StatsPanel from './components/StatsPanel';
 import ReportsPanel from './components/ReportsPanel';
+import SecurityPanel from './components/SecurityPanel';
 import LoginScreen from './components/LoginScreen';
 import RegistrationPanel from './components/RegistrationPanel';
 import { INITIAL_EMPLOYEES } from './constants';
@@ -21,6 +22,15 @@ const App: React.FC = () => {
   // State to hold saved schedules shared between Calendar and Reports
   const [globalSchedules, setGlobalSchedules] = useState<Schedule[]>([]);
 
+  // State to hold deductions shared between Reports and Calendar
+  const [globalDeductions, setGlobalDeductions] = useState<any>({
+    '40H': { ir: 0, inss: 0, unimed: 0 },
+    '20H': { ir: 0, inss: 0, unimed: 0 }
+  });
+
+  // Filtragem global para o sistema (Apenas ativos aparecem nas telas operacionais)
+  const activeEmployees = employees.filter(emp => emp.active);
+
   useEffect(() => {
     if (!currentUser) return;
 
@@ -30,11 +40,15 @@ const App: React.FC = () => {
         ? "S.G.E. Rios: Modo Administrador. Gestão completa de escalas." 
         : `S.G.E. Rios: Bem-vindo(a) ${currentUser.name}. Visualizando escala individual.`);
     } else if (activeTab === 'Dashboard') {
-      setInsight("S.G.E. Rios: Visualizando métricas de desempenho.");
+      setInsight(currentUser.role === 'ADMIN' 
+        ? "S.G.E. Rios: Visualizando monitoramento de pessoal e métricas da equipe."
+        : "S.G.E. Rios: Visualizando seu desempenho individual e carga horária.");
     } else if (activeTab === 'Relatórios') {
         setInsight("S.G.E. Rios: Processando dados financeiros e volumetria de horas.");
     } else if (activeTab === 'Cadastro') {
         setInsight("S.G.E. Rios: Módulo de registro de novos usuários e colaboradores.");
+    } else if (activeTab === 'Segurança') {
+        setInsight("S.G.E. Rios: Auditoria de acessos e monitoramento de segurança.");
     } else {
       setInsight(`S.G.E. Rios: Acesso ao módulo ${activeTab} restrito.`);
     }
@@ -49,13 +63,23 @@ const App: React.FC = () => {
     setEmployees(prev => [...prev, newEmployee]);
   };
 
-  const handleSaveSchedules = (schedules: Schedule[]) => {
-    setGlobalSchedules(schedules);
-    // Optional: Add logic here to persist to backend in a real app
-    // For now, we update the state so ReportsPanel can see it immediately
+  const handleUpdateEmployee = (updatedEmployee: Employee) => {
+    setEmployees(prev => prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
   };
 
-  // Construct menu items dynamically based on role
+  const handleDeleteEmployee = (id: string) => {
+    setEmployees(prev => prev.filter(emp => emp.id !== id));
+    setGlobalSchedules(prev => prev.filter(sch => sch.employeeId !== id));
+  };
+
+  const handleSaveSchedules = (schedules: Schedule[]) => {
+    setGlobalSchedules(schedules);
+  };
+
+  const handleSaveDeductions = (deductions: any) => {
+    setGlobalDeductions(deductions);
+  };
+
   const menuItems = [
       { label: 'Dashboard', icon: <Activity className="w-5 h-5" /> },
       ...(currentUser?.role === 'ADMIN' ? [{ label: 'Cadastro', icon: <UserPlus className="w-5 h-5" /> }] : []),
@@ -65,13 +89,16 @@ const App: React.FC = () => {
       { label: 'Sistema', icon: <Zap className="w-5 h-5" /> },
   ];
 
-  // Render Login Screen if not authenticated
   if (!currentUser) {
     return <LoginScreen onLogin={setCurrentUser} />;
   }
 
-  // Determine filtering props
   const filterEmployeeId = currentUser.role === 'TEACHER' ? currentUser.employeeId : null;
+  
+  // Dashboard filtering
+  const dashboardEmployees = filterEmployeeId 
+    ? activeEmployees.filter(e => e.id === filterEmployeeId)
+    : activeEmployees;
 
   return (
     <div className="min-h-screen bg-sci-bg text-slate-200 font-sans selection:bg-cyan-500/30">
@@ -81,7 +108,6 @@ const App: React.FC = () => {
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-900/10 rounded-full blur-[100px] animate-pulse"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-900/10 rounded-full blur-[100px] animate-pulse"></div>
         <div className="absolute top-[20%] right-[20%] w-[20%] h-[20%] bg-blue-900/10 rounded-full blur-[80px]"></div>
-        {/* Grid lines */}
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
       </div>
 
@@ -144,7 +170,6 @@ const App: React.FC = () => {
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden relative">
           
-          {/* Top Header */}
           <header className="h-16 bg-sci-panel/50 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
               <button 
@@ -164,7 +189,6 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-6">
-              {/* Scrolling ticker */}
               <div className="hidden lg:block overflow-hidden w-96 relative h-6">
                   <p className="absolute w-full text-xs font-mono text-cyan-500/80 whitespace-nowrap animate-marquee">
                       {insight}
@@ -193,28 +217,35 @@ const App: React.FC = () => {
             </div>
           </header>
 
-          {/* Scrollable Area */}
           <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
             <div className="max-w-7xl mx-auto space-y-6">
                
-               {/* Content Routing */}
                {activeTab === 'Dashboard' && (
                  <>
-                   <StatsPanel />
+                   <StatsPanel 
+                      employees={dashboardEmployees} 
+                      schedules={globalSchedules} 
+                   />
                  </>
                )}
 
                {activeTab === 'Cadastro' && currentUser.role === 'ADMIN' && (
-                  <RegistrationPanel onRegisterEmployee={handleRegisterEmployee} />
+                  <RegistrationPanel 
+                    onRegisterEmployee={handleRegisterEmployee} 
+                    onUpdateEmployee={handleUpdateEmployee}
+                    onDeleteEmployee={handleDeleteEmployee}
+                    employees={employees}
+                  />
                )}
 
                {activeTab === 'Escalas' && (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <ShiftCalendar 
                       filterEmployeeId={filterEmployeeId} 
-                      employees={employees}
-                      currentSchedules={globalSchedules} // Pass data from parent
-                      onSave={handleSaveSchedules} 
+                      employees={activeEmployees}
+                      currentSchedules={globalSchedules} 
+                      onSave={handleSaveSchedules}
+                      deductions={globalDeductions}
                     />
                   </div>
                )}
@@ -222,12 +253,18 @@ const App: React.FC = () => {
                {activeTab === 'Relatórios' && (
                   <ReportsPanel 
                     filterEmployeeId={filterEmployeeId} 
-                    employees={employees} 
-                    schedules={globalSchedules} // Pass live data
+                    employees={activeEmployees} 
+                    schedules={globalSchedules}
+                    initialDeductions={globalDeductions}
+                    onSaveDeductions={handleSaveDeductions}
                   />
                )}
 
-               {['Segurança', 'Sistema'].includes(activeTab) && (
+               {activeTab === 'Segurança' && (
+                  <SecurityPanel />
+               )}
+
+               {['Sistema'].includes(activeTab) && (
                  <NeonCard glowColor="orange" className="h-64 flex flex-col items-center justify-center text-center p-8">
                     <TriangleAlert className="w-12 h-12 text-orange-400 mb-4 animate-pulse" />
                     <h2 className="text-2xl font-mono text-white mb-2">Acesso Restrito</h2>
@@ -237,7 +274,6 @@ const App: React.FC = () => {
             
             </div>
           </div>
-
         </main>
       </div>
     </div>

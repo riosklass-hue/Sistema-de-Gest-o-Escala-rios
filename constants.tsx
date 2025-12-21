@@ -1,13 +1,14 @@
+
 import { Employee, ShiftType } from "./types";
 import { User, Shield, Zap, Database, Activity } from 'lucide-react';
 import React from 'react';
 
 export const INITIAL_EMPLOYEES: Employee[] = [
-  { id: '1', name: 'Ana Silva', role: 'Engenheira Sênior', avatarUrl: 'https://picsum.photos/100/100?random=1' },
-  { id: '2', name: 'Carlos Mendes', role: 'Técnico Líder', avatarUrl: 'https://picsum.photos/100/100?random=2' },
-  { id: '3', name: 'Marina Costa', role: 'Analista de Dados', avatarUrl: 'https://picsum.photos/100/100?random=3' },
-  { id: '4', name: 'João Santos', role: 'Operador T1', avatarUrl: 'https://picsum.photos/100/100?random=4' },
-  { id: '5', name: 'Beatriz Lima', role: 'Planejamento', avatarUrl: 'https://picsum.photos/100/100?random=5' },
+  { id: '1', name: 'Ana Silva', role: 'Engenheira Sênior', avatarUrl: 'https://picsum.photos/100/100?random=1', active: true },
+  { id: '2', name: 'Carlos Mendes', role: 'Técnico Líder', avatarUrl: 'https://picsum.photos/100/100?random=2', active: true },
+  { id: '3', name: 'Marina Costa', role: 'Analista de Dados', avatarUrl: 'https://picsum.photos/100/100?random=3', active: true },
+  { id: '4', name: 'João Santos', role: 'Operador T1', avatarUrl: 'https://picsum.photos/100/100?random=4', active: true },
+  { id: '5', name: 'Beatriz Lima', role: 'Planejamento', avatarUrl: 'https://picsum.photos/100/100?random=5', active: true },
 ];
 
 export const SHIFT_COLORS: Record<ShiftType, string> = {
