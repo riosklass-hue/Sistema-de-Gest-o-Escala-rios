@@ -1,11 +1,10 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Employee, ShiftType, Schedule, Shift } from '../types';
+import { Employee, ShiftType, Schedule, Shift, ModulePermission } from '../types';
 import { SHIFT_COLORS, PORTO_VELHO_HOLIDAYS, SHIFT_SLOTS } from '../constants';
-import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, BookOpen, Calculator, CalendarDays, ArrowRight, Sun, Sunset, Moon, CheckSquare, Square, CheckCircle, Wallet, Clock, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Wand2, Loader2, Calendar as CalendarIcon, Save, Calculator, Wallet, Clock, Info, CheckCircle, CheckSquare, Square, DollarSign, CalendarDays, Zap, School, UserMinus } from 'lucide-react';
 import NeonCard from './NeonCard';
 import { generateSmartSchedule } from '../services/geminiService';
-
-const HOURLY_RATE = 32.00;
 
 interface ShiftCalendarProps {
     filterEmployeeId?: string | null;
@@ -13,6 +12,13 @@ interface ShiftCalendarProps {
     onSave?: (schedules: Schedule[]) => void;
     currentSchedules?: Schedule[];
     deductions?: any;
+    externalDate?: Date;
+    onDateChange?: (date: Date) => void;
+    hourlyRate: number;
+    onHourlyRateChange: (rate: number) => void;
+    availableCourses: string[];
+    schools: string[];
+    permission: ModulePermission; 
 }
 
 interface SlotConfig {
@@ -21,6 +27,7 @@ interface SlotConfig {
     totalHours: number;
     endDateStr: string; 
     courseName: string; 
+    schoolName: string;
 }
 
 interface EditingShiftState {
@@ -34,8 +41,28 @@ interface EditingShiftState {
     };
 }
 
-const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employees, onSave, currentSchedules, deductions }) => {
-  const [currentDate, setCurrentDate] = useState(new Date());
+const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ 
+    filterEmployeeId, 
+    employees, 
+    onSave, 
+    currentSchedules, 
+    deductions,
+    externalDate,
+    onDateChange,
+    hourlyRate,
+    onHourlyRateChange,
+    availableCourses,
+    schools,
+    permission
+}) => {
+  const [internalDate, setInternalDate] = useState(new Date());
+  
+  const currentDate = externalDate || internalDate;
+  const setCurrentDate = (date: Date) => {
+      if (onDateChange) onDateChange(date);
+      else setInternalDate(date);
+  };
+
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -47,18 +74,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
 
   const monthName = currentDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
 
-  // --- Helpers ---
-  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-
-  const isNonWorkingDay = useCallback((date: Date): boolean => {
-    const dayOfWeek = date.getDay(); 
-    if (dayOfWeek === 0 || dayOfWeek === 6) return true;
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const key = `${mm}-${dd}`;
-    return PORTO_VELHO_HOLIDAYS.includes(key);
-  }, []);
-
   const formatDateStr = (date: Date): string => {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -66,113 +81,135 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
       return `${y}-${m}-${d}`;
   };
 
-  const parseDateStr = (dateStr: string): Date => {
-    const parts = dateStr.split('-');
-    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-  };
+  const isWorkingDay = useCallback((date: Date): boolean => {
+    const dayOfWeek = date.getDay(); 
+    if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return !PORTO_VELHO_HOLIDAYS.includes(`${mm}-${dd}`);
+  }, []);
 
-  // --- Cálculos de Resumo em Tempo Real (Sincronizado com Relatório) ---
+  const calculateEndDate = useCallback((startDateStr: string, totalHours: number, capacityPerDay: number = 4): string => {
+    if (!totalHours || totalHours <= 0) return startDateStr;
+    const daysNeeded = Math.ceil(totalHours / capacityPerDay);
+    let daysProcessed = 0;
+    let currDate = new Date(startDateStr + 'T12:00:00');
+    while (daysProcessed < daysNeeded) {
+        if (isWorkingDay(currDate)) daysProcessed++;
+        if (daysProcessed < daysNeeded) currDate.setDate(currDate.getDate() + 1);
+    }
+    return formatDateStr(currDate);
+  }, [isWorkingDay]);
+
+  const checkActiveAssignment = useCallback((empId: string, dateStr: string, slotKey: 'MORNING' | 'AFTERNOON' | 'NIGHT', currentSchedulesList: Schedule[]) => {
+    const empSchedule = currentSchedulesList.find(s => s.employeeId === empId);
+    if (!empSchedule) return null;
+    const directShift = empSchedule.shifts[dateStr];
+    if (directShift && directShift.activeSlots?.includes(slotKey)) {
+        return { 
+          type: directShift.type, 
+          courseName: directShift.slotDetails?.[slotKey]?.courseName || directShift.courseName,
+          schoolName: directShift.slotDetails?.[slotKey]?.schoolName 
+        };
+    }
+    for (const shift of Object.values(empSchedule.shifts) as Shift[]) {
+        const detail = shift.slotDetails?.[slotKey];
+        if (detail && detail.startDateStr && detail.endDateStr) {
+            if (dateStr >= detail.startDateStr && dateStr <= detail.endDateStr) {
+                return { 
+                  type: shift.type, 
+                  courseName: detail.courseName,
+                  schoolName: detail.schoolName 
+                };
+            }
+        }
+    }
+    return null;
+  }, []);
+
+  // CÁLCULO DE OCIOSIDADE POR COLABORADOR
+  const individualStats = useMemo(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    let businessDays = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+        if (isWorkingDay(new Date(year, month, d))) businessDays++;
+    }
+    const potentialHours = businessDays * 12;
+
+    const stats: Record<string, { worked: number; idle: number }> = {};
+
+    displayedEmployees.forEach(emp => {
+      let worked = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(year, month, d);
+        if (!isWorkingDay(dateObj)) continue;
+        
+        const dateStr = formatDateStr(dateObj);
+        const m = checkActiveAssignment(emp.id, dateStr, 'MORNING', schedules);
+        const t = checkActiveAssignment(emp.id, dateStr, 'AFTERNOON', schedules);
+        const n = checkActiveAssignment(emp.id, dateStr, 'NIGHT', schedules);
+
+        if (m && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(m.type)) worked += 4;
+        if (t && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(t.type)) worked += 4;
+        if (n && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(n.type)) worked += 4;
+      }
+      stats[emp.id] = { worked, idle: Math.max(0, potentialHours - worked) };
+    });
+
+    return stats;
+  }, [schedules, currentDate, displayedEmployees, checkActiveAssignment, isWorkingDay]);
+
   const calendarTotals = useMemo(() => {
     let h40 = 0;
     let h20 = 0;
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-    schedules.forEach(sch => {
-        if (filterEmployeeId && sch.employeeId !== filterEmployeeId) return;
-
-        Object.entries(sch.shifts).forEach(([dateStr, shift]: [string, Shift]) => {
-            const dateObj = new Date(dateStr + 'T00:00:00');
-            if (dateObj.getMonth() !== month || dateObj.getFullYear() !== year) return;
-            
-            // Regra idêntica ao relatório: Somente dias úteis e tipos remuneráveis
-            const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-            const isPaidType = [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(shift.type);
-
-            if (!isWeekend && isPaidType) {
-                shift.activeSlots?.forEach(slot => {
-                    if (slot === 'MORNING' || slot === 'AFTERNOON') h40 += 4;
-                    else if (slot === 'NIGHT') h20 += 4;
-                });
-            }
-        });
+    displayedEmployees.forEach(emp => {
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(year, month, d);
+        if (!isWorkingDay(dateObj)) continue;
+        const dateStr = formatDateStr(dateObj);
+        const m = checkActiveAssignment(emp.id, dateStr, 'MORNING', schedules);
+        const t = checkActiveAssignment(emp.id, dateStr, 'AFTERNOON', schedules);
+        const n = checkActiveAssignment(emp.id, dateStr, 'NIGHT', schedules);
+        if (m && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(m.type)) h40 += 4;
+        if (t && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(t.type)) h40 += 4;
+        if (n && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(n.type)) h20 += 4;
+      }
     });
 
-    const g40 = h40 * HOURLY_RATE;
-    const g20 = h20 * HOURLY_RATE;
-    const totalGross = g40 + g20;
+    const totalHours = h40 + h20;
+    const totalNet = totalHours * hourlyRate;
+    return { h40, h20, totalHours, totalNet };
+  }, [schedules, currentDate, displayedEmployees, hourlyRate, checkActiveAssignment, isWorkingDay]);
 
-    // Cálculo do líquido usando as deduções globais (se houver)
-    let totalNet = totalGross;
-    if (deductions) {
-        const d40 = (deductions['40H']?.ir || 0) + (deductions['40H']?.inss || 0) + (deductions['40H']?.unimed || 0);
-        const d20 = (deductions['20H']?.ir || 0) + (deductions['20H']?.inss || 0) + (deductions['20H']?.unimed || 0);
-        totalNet = totalGross - (d40 + d20);
-    }
-
-    return { 
-        h40, 
-        h20, 
-        totalHours: h40 + h20, 
-        totalGross,
-        totalNet 
-    };
-  }, [schedules, currentDate, filterEmployeeId, deductions]);
-
-  // --- Inicialização Automática ---
   useEffect(() => {
-    const baseSchedules = (currentSchedules && currentSchedules.length > 0) 
-        ? currentSchedules 
-        : schedules;
-
+    const baseSchedules = (currentSchedules && currentSchedules.length > 0) ? currentSchedules : schedules;
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const daysInCurrentMonth = getDaysInMonth(year, month);
-    
+    const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
     const newSchedules = employees.map(emp => {
         const existingSchedule = baseSchedules.find(s => s.employeeId === emp.id);
         const shifts = existingSchedule ? { ...existingSchedule.shifts } : {};
-
         for (let day = 1; day <= daysInCurrentMonth; day++) {
             const dateObj = new Date(year, month, day);
             const dateStr = formatDateStr(dateObj);
-            if (!shifts[dateStr]) {
-                if (isNonWorkingDay(dateObj)) {
-                    shifts[dateStr] = {
-                        date: dateStr,
-                        type: ShiftType.FINAL,
-                        activeSlots: ['MORNING', 'AFTERNOON', 'NIGHT'],
-                        courseName: 'Final de Semana / Feriado'
-                    };
-                }
+            if (!shifts[dateStr] && !isWorkingDay(dateObj)) {
+                shifts[dateStr] = { date: dateStr, type: ShiftType.FINAL, activeSlots: ['MORNING', 'AFTERNOON', 'NIGHT'], courseName: 'Fim de Semana' };
             }
         }
         return { employeeId: emp.id, shifts: shifts };
     });
     setSchedules(newSchedules);
-  }, [employees, currentDate, isNonWorkingDay, currentSchedules]); 
-
-  const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
-  const calculateWorkingDates = (startDateStr: string, totalHours: number): string[] => {
-      if (!startDateStr) return [];
-      if (totalHours <= 0) return [startDateStr];
-      const durationInDays = Math.ceil(totalHours / 4); 
-      const validDates: string[] = [];
-      let currentDateIterator = parseDateStr(startDateStr);
-      let safetyCounter = 0;
-      while (validDates.length < durationInDays && safetyCounter < 365) {
-          if (!isNonWorkingDay(currentDateIterator)) {
-              validDates.push(formatDateStr(currentDateIterator));
-          }
-          currentDateIterator.setDate(currentDateIterator.getDate() + 1);
-          safetyCounter++;
-      }
-      return validDates;
-  };
+  }, [employees, currentDate, isWorkingDay, currentSchedules]);
 
   const handleGenerateAI = async () => {
+    if (!permission.add) return;
     setLoading(true);
     try {
       const aiData = await generateSmartSchedule(displayedEmployees, currentDate.getFullYear(), currentDate.getMonth() + 1);
@@ -182,17 +219,14 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
             displayedEmployees.forEach(emp => {
                 const empAiData = aiData.find((d: any) => d.employeeName === emp.name) || aiData.find((d:any) => d.employeeId === emp.id);
                 if (empAiData && empAiData.shifts) {
-                     const shifts: Record<string, any> = {};
-                     const existingEmpShifts = prev.find(s => s.employeeId === emp.id)?.shifts || {};
-                     Object.assign(shifts, existingEmpShifts);
+                     const shifts: Record<string, any> = { ...prev.find(s => s.employeeId === emp.id)?.shifts };
                      empAiData.shifts.forEach((s: any) => {
                         const dayStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(s.day).padStart(2, '0')}`;
-                        const type = s.type as ShiftType;
-                        let defaultSlots: ('MORNING'|'AFTERNOON'|'NIGHT')[] = [];
-                        if (type === ShiftType.FINAL) defaultSlots = ['MORNING', 'AFTERNOON', 'NIGHT'];
-                        else if (type === ShiftType.T1 || type === ShiftType.Q1) defaultSlots = ['MORNING', 'AFTERNOON'];
-                        else if (type === ShiftType.PLAN) defaultSlots = ['MORNING'];
-                        shifts[dayStr] = { date: dayStr, type: type, activeSlots: type === ShiftType.OFF ? [] : defaultSlots };
+                        shifts[dayStr] = { 
+                          date: dayStr, 
+                          type: s.type, 
+                          activeSlots: s.type === ShiftType.OFF ? [] : ['MORNING', 'AFTERNOON', 'NIGHT'] 
+                        };
                      });
                      const index = newSchedules.findIndex(s => s.employeeId === emp.id);
                      if (index !== -1) newSchedules[index] = { ...newSchedules[index], shifts };
@@ -201,259 +235,132 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
             return newSchedules;
         });
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
   const handleSaveSystem = () => {
+    if (!permission.edit) return;
     if (onSave) onSave(schedules);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  const getShift = (empId: string, day: number): Shift | undefined => {
-    const schedule = schedules.find(s => s.employeeId === empId);
-    if (!schedule) return undefined;
-    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return schedule.shifts[dateStr];
-  };
-
   const openShiftEditor = (empId: string, day: number) => {
+    if (!permission.edit) return;
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const existingShift = schedules.find(s => s.employeeId === empId)?.shifts[dateStr];
-    const currentSlots = existingShift?.activeSlots || [];
-    const getCourse = (slot: string) => existingShift?.slotDetails?.[slot]?.courseName || existingShift?.courseName || '';
-
     setEditingState({
         employeeId: empId, baseDateStr: dateStr, type: existingShift?.type || ShiftType.T1,
         slots: {
-            MORNING: { active: currentSlots.includes('MORNING'), startDateStr: dateStr, totalHours: 0, endDateStr: dateStr, courseName: getCourse('MORNING') },
-            AFTERNOON: { active: currentSlots.includes('AFTERNOON'), startDateStr: dateStr, totalHours: 0, endDateStr: dateStr, courseName: getCourse('AFTERNOON') },
-            NIGHT: { active: currentSlots.includes('NIGHT'), startDateStr: dateStr, totalHours: 0, endDateStr: dateStr, courseName: getCourse('NIGHT') }
+            MORNING: { active: existingShift?.activeSlots?.includes('MORNING') || false, startDateStr: existingShift?.slotDetails?.['MORNING']?.startDateStr || dateStr, totalHours: existingShift?.slotDetails?.['MORNING']?.totalHours || 0, endDateStr: existingShift?.slotDetails?.['MORNING']?.endDateStr || dateStr, courseName: existingShift?.slotDetails?.['MORNING']?.courseName || '', schoolName: existingShift?.slotDetails?.['MORNING']?.schoolName || '' },
+            AFTERNOON: { active: existingShift?.activeSlots?.includes('AFTERNOON') || false, startDateStr: existingShift?.slotDetails?.['AFTERNOON']?.startDateStr || dateStr, totalHours: existingShift?.slotDetails?.['AFTERNOON']?.totalHours || 0, endDateStr: existingShift?.slotDetails?.['AFTERNOON']?.endDateStr || dateStr, courseName: existingShift?.slotDetails?.['AFTERNOON']?.courseName || '', schoolName: existingShift?.slotDetails?.['AFTERNOON']?.schoolName || '' },
+            NIGHT: { active: existingShift?.activeSlots?.includes('NIGHT') || false, startDateStr: existingShift?.slotDetails?.['NIGHT']?.startDateStr || dateStr, totalHours: existingShift?.slotDetails?.['NIGHT']?.totalHours || 0, endDateStr: existingShift?.slotDetails?.['NIGHT']?.endDateStr || dateStr, courseName: existingShift?.slotDetails?.['NIGHT']?.courseName || '', schoolName: existingShift?.slotDetails?.['NIGHT']?.schoolName || '' }
         }
     });
   };
 
   const saveShiftDetails = () => {
-      if (!editingState) return;
+      if (!editingState || !permission.edit) return;
       setSchedules(prev => prev.map(sch => {
           if (sch.employeeId !== editingState.employeeId) return sch;
           const updatedShifts = { ...sch.shifts };
-          const addSlotToDay = (dateStr: string, slot: 'MORNING' | 'AFTERNOON' | 'NIGHT', courseName: string) => {
-              if (!updatedShifts[dateStr]) {
-                  updatedShifts[dateStr] = { date: dateStr, type: editingState.type, activeSlots: [], slotDetails: {} };
-              } else { updatedShifts[dateStr].type = editingState.type; }
-              const slots = updatedShifts[dateStr].activeSlots || [];
-              if (!slots.includes(slot)) slots.push(slot);
-              updatedShifts[dateStr].activeSlots = slots;
-              updatedShifts[dateStr].slotDetails = { ...updatedShifts[dateStr].slotDetails, [slot]: { courseName } };
-              updatedShifts[dateStr].courseName = courseName; 
-          };
           const baseDate = editingState.baseDateStr;
-          if (!updatedShifts[baseDate]) {
-              updatedShifts[baseDate] = { date: baseDate, type: editingState.type, activeSlots: [], slotDetails: {} };
-          } else {
-              updatedShifts[baseDate].type = editingState.type;
-              updatedShifts[baseDate].activeSlots = []; 
-              updatedShifts[baseDate].slotDetails = {};
-          }
-          if (editingState.slots.MORNING.active) {
-              addSlotToDay(baseDate, 'MORNING', editingState.slots.MORNING.courseName);
-              if (editingState.slots.MORNING.totalHours > 4) {
-                  const dates = calculateWorkingDates(editingState.slots.MORNING.startDateStr, editingState.slots.MORNING.totalHours);
-                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'MORNING', editingState.slots.MORNING.courseName));
-              }
-          }
-          if (editingState.slots.AFTERNOON.active) {
-              addSlotToDay(baseDate, 'AFTERNOON', editingState.slots.AFTERNOON.courseName);
-              if (editingState.slots.AFTERNOON.totalHours > 4) {
-                  const dates = calculateWorkingDates(editingState.slots.AFTERNOON.startDateStr, editingState.slots.AFTERNOON.totalHours);
-                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'AFTERNOON', editingState.slots.AFTERNOON.courseName));
-              }
-          }
-          if (editingState.slots.NIGHT.active) {
-              addSlotToDay(baseDate, 'NIGHT', editingState.slots.NIGHT.courseName);
-              if (editingState.slots.NIGHT.totalHours > 4) {
-                  const dates = calculateWorkingDates(editingState.slots.NIGHT.startDateStr, editingState.slots.NIGHT.totalHours);
-                  dates.filter(d => d !== baseDate).forEach(d => addSlotToDay(d, 'NIGHT', editingState.slots.NIGHT.courseName));
-              }
-          }
-          if (editingState.type === ShiftType.OFF) {
-             updatedShifts[baseDate] = { date: baseDate, type: ShiftType.OFF, courseName: 'Folga', activeSlots: [] };
-          }
+          const activeSlots: ('MORNING' | 'AFTERNOON' | 'NIGHT')[] = [];
+          const slotDetails: any = {};
+          (['MORNING', 'AFTERNOON', 'NIGHT'] as const).forEach(slot => {
+            const config = editingState.slots[slot];
+            if (config.active) {
+                activeSlots.push(slot);
+                slotDetails[slot] = { courseName: config.courseName, schoolName: config.schoolName, startDateStr: config.startDateStr, endDateStr: config.endDateStr, totalHours: config.totalHours };
+            }
+          });
+          updatedShifts[baseDate] = { date: baseDate, type: editingState.type, activeSlots, slotDetails, courseName: editingState.slots.MORNING.courseName || editingState.slots.AFTERNOON.courseName || editingState.slots.NIGHT.courseName };
           return { ...sch, shifts: updatedShifts };
       }));
       setEditingState(null);
   };
 
-  const updateSlotConfig = (slotName: 'MORNING' | 'AFTERNOON' | 'NIGHT', field: keyof SlotConfig, value: any) => {
-      if (!editingState) return;
-      const currentSlotConfig = editingState.slots[slotName];
-      let newConfig = { ...currentSlotConfig, [field]: value };
-      if (field === 'startDateStr' || field === 'totalHours') {
-          const startDate = field === 'startDateStr' ? value : currentSlotConfig.startDateStr;
-          const hours = field === 'totalHours' ? Number(value) : currentSlotConfig.totalHours;
-          const dates = calculateWorkingDates(startDate, hours);
-          newConfig.endDateStr = dates.length > 0 ? dates[dates.length - 1] : startDate;
-      }
-      setEditingState({ ...editingState, slots: { ...editingState.slots, [slotName]: newConfig } });
-  };
-
-  const toggleSlot = (slotName: 'MORNING' | 'AFTERNOON' | 'NIGHT') => {
-      if (!editingState) return;
-      updateSlotConfig(slotName, 'active', !editingState.slots[slotName].active);
-  };
-
-  const getSlotColor = (type: ShiftType) => {
-      switch (type) {
-          case ShiftType.FINAL: return 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]';
-          case ShiftType.T1: return 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.6)]';
-          case ShiftType.Q1: return 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.6)]';
-          case ShiftType.PLAN: return 'bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.6)]';
-          case ShiftType.OFF: return 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)]';
-          default: return 'bg-slate-700';
-      }
-  };
-
   return (
-    <div className="flex flex-col gap-6 relative">
-      
-      {/* Resumo Financeiro Sincronizado */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+    <div className="flex flex-col gap-8 relative">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <NeonCard glowColor="blue" className="bg-[#0b1221]/80 border-blue-500/20">
-              <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-                      <Clock size={18} />
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-mono uppercase text-slate-500 tracking-tighter">Carga 40h (M/T)</p>
-                      <p className="text-xl font-bold text-white">{calendarTotals.h40} h</p>
-                  </div>
+              <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 rounded-xl text-blue-400"><Clock size={24} /></div>
+                  <div><p className="text-xs font-mono uppercase text-slate-500 tracking-wider font-bold mb-1">Carga 40H</p><p className="text-2xl font-bold text-white leading-none">{calendarTotals.h40} h</p></div>
               </div>
           </NeonCard>
           <NeonCard glowColor="purple" className="bg-[#0b1221]/80 border-purple-500/20">
-              <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-                      <Clock size={18} />
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-mono uppercase text-slate-500 tracking-tighter">Carga 20h (N)</p>
-                      <p className="text-xl font-bold text-white">{calendarTotals.h20} h</p>
-                  </div>
+              <div className="flex items-center gap-4">
+                  <div className="p-3 bg-purple-500/10 rounded-xl text-purple-400"><Clock size={24} /></div>
+                  <div><p className="text-xs font-mono uppercase text-slate-500 tracking-wider font-bold mb-1">Carga 20H</p><p className="text-2xl font-bold text-white leading-none">{calendarTotals.h20} h</p></div>
               </div>
           </NeonCard>
           <NeonCard glowColor="cyan" className="bg-[#0b1221]/80 border-cyan-500/20">
-              <div className="flex items-center gap-3">
-                  <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
-                      <Calculator size={18} />
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-mono uppercase text-slate-500 tracking-tighter">Total Remunerado</p>
-                      <p className="text-xl font-bold text-white">{calendarTotals.totalHours} h</p>
-                  </div>
+              <div className="flex items-center gap-4">
+                  <div className="p-3 bg-cyan-500/10 rounded-xl text-cyan-400"><Calculator size={24} /></div>
+                  <div><p className="text-xs font-mono uppercase text-slate-500 tracking-wider font-bold mb-1">Horas Úteis</p><p className="text-2xl font-bold text-white leading-none">{calendarTotals.totalHours} h</p></div>
               </div>
           </NeonCard>
-          <NeonCard glowColor="orange" className="bg-emerald-900/10 border-emerald-500/30">
-              <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-                      <Wallet size={18} />
-                  </div>
-                  <div className="flex-1">
-                      <p className="text-[10px] font-mono uppercase text-emerald-500/70 tracking-tighter">Líquido Estimado</p>
-                      <p className="text-xl font-bold text-emerald-400 font-mono">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(calendarTotals.totalNet)}
-                      </p>
-                      <p className="text-[8px] text-slate-500 font-mono italic">Bruto: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(calendarTotals.totalGross)}</p>
-                  </div>
+          <NeonCard glowColor="orange" className="bg-emerald-900/10 border-emerald-500/40 shadow-neon-emerald">
+              <div className="flex items-center gap-4">
+                  <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400"><Wallet size={24} /></div>
+                  <div><p className="text-xs font-mono uppercase text-emerald-500/70 tracking-wider font-bold mb-1">Bruto Estimado</p><p className="text-2xl font-bold text-emerald-400 font-mono leading-none">{calendarTotals.totalNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p></div>
               </div>
           </NeonCard>
       </div>
 
-      <div className="bg-blue-900/10 border border-blue-500/20 p-3 rounded-lg flex items-center gap-3">
-          <Info size={16} className="text-blue-400 shrink-0" />
-          <p className="text-[10px] text-blue-300/80 leading-none">
-            <strong>Regra de Sincronização:</strong> Turnos M/T/N apenas em dias úteis com tipos T1, Q1 ou PLAN são contabilizados. Turnos de finais de semana são exibidos mas não remunerados.
-          </p>
-      </div>
+      <NeonCard className="p-0" glowColor="cyan">
+        <div className="flex flex-col md:flex-row justify-between items-center p-6 gap-6">
+          <div className="flex items-center gap-6">
+            <div className="p-3 bg-cyan-500/10 rounded-xl border border-cyan-500/20"><CalendarIcon className="text-cyan-400 w-8 h-8" /></div>
+            <div>
+                <h2 className="text-2xl font-bold text-white tracking-widest uppercase font-mono">{monthName}</h2>
+                <div className="flex items-center gap-3 mt-2">
+                    <span className="text-xs text-slate-500 font-mono uppercase tracking-widest font-bold">Valor Hora:</span>
+                    <div className="flex items-center bg-slate-950 border border-cyan-500/30 rounded-xl px-4 py-2 shadow-inner">
+                        <span className="text-sm text-cyan-500 font-mono mr-2 font-black">R$</span>
+                        <input type="number" step="0.5" disabled={!permission.edit} value={hourlyRate} onChange={(e) => onHourlyRateChange(parseFloat(e.target.value) || 0)} className="bg-transparent border-none text-sm font-mono text-white w-16 focus:outline-none font-black disabled:opacity-50" />
+                    </div>
+                </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+             <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-3 hover:bg-white/10 rounded-xl transition-all border border-white/5"><ChevronLeft className="text-slate-300 w-6 h-6" /></button>
+             <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-3 hover:bg-white/10 rounded-xl transition-all border border-white/5"><ChevronRight className="text-slate-300 w-6 h-6" /></button>
+          </div>
+          <div className="flex gap-4">
+             {permission.add && <button onClick={handleGenerateAI} disabled={loading} className="flex items-center gap-3 px-8 py-3 rounded-xl font-black text-sm uppercase bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-lg shadow-purple-500/20">{loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Wand2 className="w-5 h-5" />} IA</button>}
+             {permission.edit && <button onClick={handleSaveSystem} className={`flex items-center gap-3 px-8 py-3 rounded-xl font-black text-sm uppercase transition-all shadow-xl ${saveSuccess ? 'bg-green-600' : 'bg-slate-800 hover:bg-slate-700 border border-white/10'}`}>{saveSuccess ? <CheckCircle className="w-5 h-5" /> : <Save className="w-5 h-5" />} Salvar</button>}
+          </div>
+        </div>
+      </NeonCard>
 
-      {/* Modal Editor */}
-      {editingState && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-              <div className="w-full max-w-4xl mx-4">
-                  <NeonCard glowColor="cyan" className="shadow-2xl" title="Gestão de Turnos & Atividades">
-                      <div className="space-y-6">
-                          <div className="grid grid-cols-5 gap-2">
-                              {Object.values(ShiftType).map((type) => (
-                                  <button key={type} onClick={() => setEditingState({...editingState, type})} className={`p-2 rounded border text-xs font-bold transition-all ${editingState.type === type ? SHIFT_COLORS[type] + ' ring-2 ring-white/20 scale-105' : 'bg-slate-900 border-white/10 text-slate-500 hover:bg-slate-800'}`}>{type}</button>
-                              ))}
-                          </div>
-                          <div className="space-y-3">
-                              <div className="grid grid-cols-[90px_105px_60px_90px_1fr] gap-3 items-center text-xs font-mono uppercase text-slate-500 pb-1 border-b border-white/10">
-                                  <span>Turno</span><span>Início</span><span>Carga</span><span className="text-right">Fim Prev.</span><span>Nome do Curso / Atividade</span>
-                              </div>
-                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.MORNING.active ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
-                                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleSlot('MORNING')}>{editingState.slots.MORNING.active ? <CheckSquare size={16} className="text-emerald-400"/> : <Square size={16} className="text-slate-500"/>}<span className="font-bold text-sm text-white">Manhã</span></div>
-                                  <input type="date" value={editingState.slots.MORNING.startDateStr} disabled={!editingState.slots.MORNING.active} onChange={(e) => updateSlotConfig('MORNING', 'startDateStr', e.target.value)} className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <input type="number" step="4" min="0" value={editingState.slots.MORNING.totalHours || ''} disabled={!editingState.slots.MORNING.active} onChange={(e) => updateSlotConfig('MORNING', 'totalHours', e.target.value)} placeholder="Hrs" className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <div className="text-right text-xs font-mono font-bold text-emerald-300">{editingState.slots.MORNING.active && editingState.slots.MORNING.endDateStr.split('-').reverse().join('/')}</div>
-                                  <input type="text" disabled={!editingState.slots.MORNING.active} value={editingState.slots.MORNING.courseName} onChange={(e) => updateSlotConfig('MORNING', 'courseName', e.target.value)} placeholder="Ex: NR-10 Manhã" className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none disabled:opacity-30" />
-                              </div>
-                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.AFTERNOON.active ? 'bg-orange-500/5 border-orange-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
-                                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleSlot('AFTERNOON')}>{editingState.slots.AFTERNOON.active ? <CheckSquare size={16} className="text-orange-400"/> : <Square size={16} className="text-slate-500"/>}<span className="font-bold text-sm text-white">Tarde</span></div>
-                                  <input type="date" value={editingState.slots.AFTERNOON.startDateStr} disabled={!editingState.slots.AFTERNOON.active} onChange={(e) => updateSlotConfig('AFTERNOON', 'startDateStr', e.target.value)} className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <input type="number" step="4" min="0" value={editingState.slots.AFTERNOON.totalHours || ''} disabled={!editingState.slots.AFTERNOON.active} onChange={(e) => updateSlotConfig('AFTERNOON', 'totalHours', e.target.value)} placeholder="Hrs" className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <div className="text-right text-xs font-mono font-bold text-orange-300">{editingState.slots.AFTERNOON.active && editingState.slots.AFTERNOON.endDateStr.split('-').reverse().join('/')}</div>
-                                  <input type="text" disabled={!editingState.slots.AFTERNOON.active} value={editingState.slots.AFTERNOON.courseName} onChange={(e) => updateSlotConfig('AFTERNOON', 'courseName', e.target.value)} placeholder="Ex: NR-35 Tarde" className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-orange-500 focus:outline-none disabled:opacity-30" />
-                              </div>
-                              <div className={`grid grid-cols-[90px_105px_60px_90px_1fr] items-center gap-3 p-3 rounded-lg border transition-all ${editingState.slots.NIGHT.active ? 'bg-purple-500/5 border-purple-500/30' : 'bg-slate-900/50 border-white/5 opacity-60'}`}>
-                                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleSlot('NIGHT')}>{editingState.slots.NIGHT.active ? <CheckSquare size={16} className="text-purple-400"/> : <Square size={16} className="text-slate-500"/>}<span className="font-bold text-sm text-white">Noite</span></div>
-                                  <input type="date" value={editingState.slots.NIGHT.startDateStr} disabled={!editingState.slots.NIGHT.active} onChange={(e) => updateSlotConfig('NIGHT', 'startDateStr', e.target.value)} className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <input type="number" step="4" min="0" value={editingState.slots.NIGHT.totalHours || ''} disabled={!editingState.slots.NIGHT.active} onChange={(e) => updateSlotConfig('NIGHT', 'totalHours', e.target.value)} placeholder="Hrs" className="bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white disabled:opacity-30 w-full" />
-                                  <div className="text-right text-xs font-mono font-bold text-purple-300">{editingState.slots.NIGHT.active && editingState.slots.NIGHT.endDateStr.split('-').reverse().join('/')}</div>
-                                  <input type="text" disabled={!editingState.slots.NIGHT.active} value={editingState.slots.NIGHT.courseName} onChange={(e) => updateSlotConfig('NIGHT', 'courseName', e.target.value)} placeholder="Ex: Supervisão Noite" className="w-full bg-slate-950 border border-white/10 rounded p-1.5 text-xs text-white focus:border-purple-500 focus:outline-none disabled:opacity-30" />
-                              </div>
-                          </div>
-                          <div className="flex gap-3 pt-2">
-                              <button onClick={() => setEditingState(null)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-lg font-bold transition-colors">Cancelar</button>
-                              <button onClick={saveShiftDetails} className="flex-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-3 rounded-lg font-bold shadow-lg hover:shadow-neon-cyan transition-all flex items-center justify-center gap-2"><Save size={16} /> Aplicar Escala</button>
-                          </div>
+      {editingState && permission.edit && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-lg p-4 animate-in fade-in duration-300">
+              <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+                  <NeonCard glowColor="cyan" title="Configurador de Turnos e Prazos" icon={<Clock size={20}/>}>
+                      <div className="space-y-10">
+                          <div className="grid grid-cols-5 gap-4">{Object.values(ShiftType).map(type => (<button key={type} onClick={() => setEditingState({...editingState, type})} className={`py-4 px-2 rounded-xl text-sm font-black transition-all shadow-lg ${editingState.type === type ? SHIFT_COLORS[type] : 'bg-slate-900 text-slate-500 border border-white/5'}`}>{type}</button>))}</div>
+                          <div className="space-y-6">{(['MORNING', 'AFTERNOON', 'NIGHT'] as const).map((slot) => (<div key={slot} className={`p-6 rounded-2xl border transition-all ${editingState.slots[slot].active ? 'border-cyan-500/40 bg-cyan-500/5 shadow-neon-cyan/5' : 'border-white/5 opacity-40 hover:opacity-70'}`}><div className="flex flex-col md:flex-row gap-6"><div className="flex items-center gap-4 min-w-[140px]"><button onClick={() => setEditingState({...editingState, slots: {...editingState.slots, [slot]: {...editingState.slots[slot], active: !editingState.slots[slot].active}}})} className="p-1 transition-transform hover:scale-110">{editingState.slots[slot].active ? <CheckSquare className="text-cyan-400 w-8 h-8"/> : <Square className="text-slate-600 w-8 h-8"/>}</button><span className="text-sm font-black text-white uppercase tracking-widest">{SHIFT_SLOTS[slot].label}</span></div><div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4"><div className="md:col-span-2 space-y-1"><label className="text-[10px] font-mono text-slate-500 uppercase font-black">Disciplina / Atividade</label><select value={editingState.slots[slot].courseName} onChange={e => setEditingState({...editingState, slots: {...editingState.slots, [slot]: {...editingState.slots[slot], courseName: e.target.value}}})} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-cyan-500 font-bold"><option value="">Selecione um curso...</option>{availableCourses.map(c => <option key={c} value={c}>{c}</option>)}</select></div><div className="md:col-span-2 space-y-1"><label className="text-[10px] font-mono text-slate-500 uppercase font-black flex items-center gap-2"><School size={12} className="text-cyan-500" /> Escola / Unidade</label><select value={editingState.slots[slot].schoolName} onChange={e => setEditingState({...editingState, slots: {...editingState.slots, [slot]: {...editingState.slots[slot], schoolName: e.target.value}}})} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-cyan-500 font-bold"><option value="">Selecione uma escola...</option>{schools.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="space-y-1"><label className="text-[10px] font-mono text-slate-500 uppercase font-black">Data Início</label><input type="date" value={editingState.slots[slot].startDateStr} onChange={e => { const newStart = e.target.value; const newEnd = calculateEndDate(newStart, editingState.slots[slot].totalHours); setEditingState({...editingState, slots: {...editingState.slots, [slot]: {...editingState.slots[slot], startDateStr: newStart, endDateStr: newEnd}}}); }} className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-white focus:outline-none focus:border-cyan-500 font-mono font-bold" /></div><div className="space-y-1"><label className="text-[10px] font-mono text-slate-500 uppercase font-black">Data Fim</label><div className="relative"><input type="date" value={editingState.slots[slot].endDateStr} className="w-full bg-slate-900/50 border border-cyan-500/20 rounded-xl p-3 text-[11px] text-cyan-400/70 focus:outline-none focus:border-cyan-500 font-mono font-bold cursor-not-allowed" readOnly /><Zap size={12} className="absolute right-3 top-4 text-cyan-500 animate-pulse" /></div></div><div className="space-y-1"><label className="text-[10px] font-mono text-slate-500 uppercase font-black">Carga Total (h)</label><div className="relative"><input type="number" placeholder="Ex: 60" value={editingState.slots[slot].totalHours || ''} onChange={e => { const hours = parseInt(e.target.value) || 0; const currentSlot = editingState.slots[slot]; const newEnd = calculateEndDate(currentSlot.startDateStr, hours); setEditingState({...editingState, slots: {...editingState.slots, [slot]: {...currentSlot, totalHours: hours, endDateStr: newEnd, active: hours > 0}}}); }} className="w-full bg-slate-950 border border-cyan-500/30 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-cyan-500 font-black shadow-inner" /><span className="absolute right-3 top-3.5 text-[10px] text-slate-500 font-mono">h</span></div></div></div></div></div>))}</div>
+                          <div className="flex gap-6 pt-6"><button onClick={() => setEditingState(null)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-5 rounded-2xl font-black text-base uppercase tracking-widest border border-white/10 transition-all">Cancelar</button><button onClick={saveShiftDetails} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white py-5 rounded-2xl font-black text-base uppercase tracking-widest shadow-neon-cyan transition-all">Confirmar Ajustes</button></div>
                       </div>
                   </NeonCard>
               </div>
           </div>
       )}
 
-      {/* Calendário Controles */}
-      <NeonCard className="p-0" glowColor="cyan">
-        <div className="flex flex-col md:flex-row justify-between items-center p-4 gap-4">
-          <div className="flex items-center gap-4">
-            <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20"><CalendarIcon className="text-cyan-400 w-6 h-6" /></div>
-            <div><h2 className="text-xl font-bold text-white tracking-wide uppercase font-mono">{monthName}</h2><p className="text-xs text-slate-400">{filterEmployeeId ? 'Visualização Individual' : 'Planejamento Geral de Equipe'}</p></div>
-          </div>
-          <div className="flex items-center gap-2">
-             <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><ChevronLeft className="text-slate-300" /></button>
-             <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><ChevronRight className="text-slate-300" /></button>
-          </div>
-          <div className="flex gap-3">
-             <button onClick={handleGenerateAI} disabled={loading} className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-sm tracking-wider uppercase transition-all ${loading ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg hover:shadow-neon-purple'}`}>{loading ? <Loader2 className="animate-spin w-4 h-4" /> : <Wand2 className="w-4 h-4" />}{loading ? 'IA Process...' : 'Gerar Escala (IA)'}</button>
-             <button onClick={handleSaveSystem} className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold text-sm tracking-wider uppercase transition-all ${saveSuccess ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white'}`}>{saveSuccess ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}{saveSuccess ? 'Salvo!' : 'Salvar'}</button>
-          </div>
-        </div>
-      </NeonCard>
-
-      {/* Grid Principal */}
       <NeonCard className="overflow-hidden p-0" glowColor="none">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
-              <tr>
-                <th className="sticky left-0 z-20 bg-sci-bg p-4 text-left border-b border-r border-white/10 min-w-[200px]"><span className="text-xs font-mono text-slate-500 uppercase">Colaborador</span></th>
-                {daysArray.map(day => (
-                  <th key={day} className="p-2 min-w-[50px] text-center border-b border-white/10 bg-sci-bg/50">
-                    <div className="flex flex-col items-center"><span className="text-[10px] text-slate-500 font-mono">{new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toLocaleDateString('pt-BR', { weekday: 'narrow' })}</span><span className="text-sm font-bold text-slate-300">{day}</span></div>
+              <tr className="bg-slate-900/70">
+                <th className="sticky left-0 z-20 bg-sci-bg p-5 text-left border-b border-r border-white/10 min-w-[240px] shadow-xl"><span className="text-xs font-mono text-slate-500 uppercase tracking-widest font-black">Equipe Operacional</span></th>
+                {Array.from({ length: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => (
+                  <th key={day} className="p-3 min-w-[100px] text-center border-b border-white/10">
+                    <div className="flex flex-col items-center">
+                        <span className="text-[11px] text-slate-500 uppercase font-mono font-bold">{new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toLocaleDateString('pt-BR', { weekday: 'narrow' })}</span>
+                        <span className="text-sm font-black text-slate-200">{day}</span>
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -461,33 +368,33 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({ filterEmployeeId, employe
             <tbody>
               {displayedEmployees.map((emp) => (
                 <tr key={emp.id} className="group hover:bg-white/5 transition-colors">
-                  <td className="sticky left-0 z-10 p-3 border-r border-b border-white/10 bg-[#050b14] group-hover:bg-[#0b1221] transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <img src={emp.avatarUrl} alt={emp.name} className="w-10 h-10 rounded-full border-2 border-slate-700 group-hover:border-cyan-500/50 transition-colors" />
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#050b14]"></div>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm text-slate-200">{emp.name}</p>
-                        <p className="text-[10px] text-slate-500 font-mono uppercase">{emp.role}</p>
-                      </div>
+                  <td className="sticky left-0 z-10 p-4 border-r border-b border-white/10 bg-[#050b14] group-hover:bg-[#0b1221] shadow-lg">
+                    <div className="flex items-center gap-4 relative">
+                        <img src={emp.avatarUrl} alt="" className="w-10 h-10 rounded-full border-2 border-slate-700 shadow-inner" />
+                        <div className="flex flex-col truncate">
+                            <span className="text-sm font-black text-slate-200 truncate max-w-[120px]">{emp.name}</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded border ${individualStats[emp.id]?.idle > 30 ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-slate-800 text-slate-500 border-white/5'}`}>
+                                    {individualStats[emp.id]?.idle} h <small className="opacity-50 text-[8px]">ociosas</small>
+                                </span>
+                            </div>
+                        </div>
                     </div>
                   </td>
-                  {daysArray.map(day => {
-                    const shift = getShift(emp.id, day);
-                    const shiftType = shift?.type || ShiftType.OFF;
-                    const hasMorning = shift?.activeSlots?.includes('MORNING');
-                    const hasAfternoon = shift?.activeSlots?.includes('AFTERNOON');
-                    const hasNight = shift?.activeSlots?.includes('NIGHT');
-                    const isOff = shiftType === ShiftType.OFF;
-                    const cellBg = isOff ? 'bg-red-500/10 border-red-500/20' : '';
-                    const colorClass = getSlotColor(shiftType);
+                  {Array.from({ length: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
+                    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const morningAsgn = checkActiveAssignment(emp.id, dateStr, 'MORNING', schedules);
+                    const afternoonAsgn = checkActiveAssignment(emp.id, dateStr, 'AFTERNOON', schedules);
+                    const nightAsgn = checkActiveAssignment(emp.id, dateStr, 'NIGHT', schedules);
                     return (
-                      <td key={`${emp.id}-${day}`} onClick={() => openShiftEditor(emp.id, day)} className={`p-1 border-b border-white/5 cursor-pointer relative ${cellBg} hover:bg-white/5`}>
-                         <div className="w-full h-12 flex flex-col justify-between py-0.5 gap-[1px]">
-                           <div className={`h-full w-full rounded-sm transition-all ${hasMorning ? colorClass : 'bg-slate-800/50'}`}></div>
-                           <div className={`h-full w-full rounded-sm transition-all ${hasAfternoon ? colorClass : 'bg-slate-800/50'}`}></div>
-                           <div className={`h-full w-full rounded-sm transition-all ${hasNight ? colorClass : 'bg-slate-800/50'}`}></div>
+                      <td key={day} onClick={() => openShiftEditor(emp.id, day)} className={`p-1 border-b border-white/5 transition-all min-w-[100px] ${permission.edit ? 'cursor-pointer hover:bg-cyan-500/15' : 'cursor-default'}`}>
+                         <div className="w-full h-[90px] flex flex-col gap-[2px]">
+                           {[morningAsgn, afternoonAsgn, nightAsgn].map((asgn, idx) => (
+                             <div key={idx} className={`h-full w-full rounded-md transition-all flex flex-col justify-center px-2 overflow-hidden relative ${asgn ? SHIFT_COLORS[asgn.type] : 'bg-slate-800/30'}`}>
+                                {asgn?.courseName && <span className="text-[9px] font-black uppercase tracking-tighter truncate text-white drop-shadow-md">{asgn.courseName}</span>}
+                                {asgn?.schoolName && <span className="text-[7px] opacity-70 truncate text-white">{asgn.schoolName}</span>}
+                             </div>
+                           ))}
                          </div>
                       </td>
                     );

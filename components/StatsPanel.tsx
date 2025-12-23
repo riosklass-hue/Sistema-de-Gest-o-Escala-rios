@@ -1,324 +1,332 @@
-import React, { useMemo } from 'react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
+
+import React, { useMemo, useState, useCallback } from 'react';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 import NeonCard from './NeonCard';
-import { BarChart3, PieChart as PieChartIcon, Users, UserCheck, Coffee, Search, Activity, Clock, CalendarDays, ClipboardList } from 'lucide-react';
+import { UserCheck, Activity, Clock, Wallet, TrendingUp, DollarSign, Calendar, Info, CheckCircle, ChevronLeft, ChevronRight, Calculator, MinusCircle, ShieldCheck, Trash2, Wand2, Loader2, Zap, Hourglass, Coffee, BarChart3, Target, Briefcase, Settings, Landmark, ArrowUpRight, ArrowDownRight, PieChart as PieIcon } from 'lucide-react';
 import { Employee, Schedule, ShiftType, Shift } from '../types';
+import { ANNUAL_CR_2025, PORTO_VELHO_HOLIDAYS } from '../constants';
 
 interface StatsPanelProps {
+  isAdmin: boolean;
   employees: Employee[];
   schedules: Schedule[];
+  selectedDate: Date;
+  onDateChange: (date: Date) => void;
+  hourlyRate: number;
+  deductions: any;
+  onClearSchedule?: () => void;
+  onGenerateAI?: () => Promise<void>;
 }
 
-const StatsPanel: React.FC<StatsPanelProps> = ({ employees, schedules }) => {
-  const isIndividual = employees.length === 1;
+const StatsPanel: React.FC<StatsPanelProps> = ({ 
+    isAdmin,
+    employees, 
+    schedules, 
+    selectedDate, 
+    onDateChange, 
+    hourlyRate, 
+    deductions,
+    onClearSchedule,
+    onGenerateAI
+}) => {
+  const viewedYear = selectedDate.getFullYear();
+  const viewedMonth = selectedDate.getMonth();
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  // Dados de Monitoramento "HOJE"
-  const todayStatus = useMemo(() => {
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const isBusinessDay = (date: Date): boolean => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return !PORTO_VELHO_HOLIDAYS.includes(`${mm}-${dd}`);
+  };
 
-    const groups: Record<string, Employee[]> = {
-        [ShiftType.T1]: [],
-        [ShiftType.Q1]: [],
-        [ShiftType.PLAN]: [],
-        [ShiftType.OFF]: [],
-        [ShiftType.FINAL]: [],
-        'IDLE': []
-    };
+  const checkActiveAssignment = useCallback((empId: string, dateStr: string, slotKey: 'MORNING' | 'AFTERNOON' | 'NIGHT', currentSchedulesList: Schedule[]) => {
+    const empSchedule = currentSchedulesList.find(s => s.employeeId === empId);
+    if (!empSchedule) return null;
 
-    employees.forEach(emp => {
-        const schedule = schedules.find(s => s.employeeId === emp.id);
-        const shiftToday = schedule?.shifts[dateStr];
+    const directShift = empSchedule.shifts[dateStr];
+    if (directShift && directShift.activeSlots?.includes(slotKey)) {
+        return { type: directShift.type };
+    }
 
-        if (shiftToday) {
-            groups[shiftToday.type].push(emp);
-        } else {
-            groups['IDLE'].push(emp);
+    for (const shift of Object.values(empSchedule.shifts) as Shift[]) {
+        const detail = shift.slotDetails?.[slotKey];
+        if (detail && detail.startDateStr && detail.endDateStr) {
+            if (dateStr >= detail.startDateStr && dateStr <= detail.endDateStr) {
+                return { type: shift.type };
+            }
         }
-    });
+    }
+    return null;
+  }, []);
 
-    return groups;
-  }, [employees, schedules]);
-
-  // Dados de Resumo Mensal por Colaborador
-  const monthlySummary = useMemo(() => {
-    const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
-
-    return employees.map(emp => {
-      const schedule = schedules.find(s => s.employeeId === emp.id);
-      const stats = {
-        ti: 0,
-        qi: 0,
-        plan: 0,
-        folga: 0,
-        final: 0,
-        hours40: 0,
-        hours20: 0
-      };
-
-      if (schedule) {
-        Object.entries(schedule.shifts).forEach(([dateStr, shift]: [string, Shift]) => {
-          const date = new Date(dateStr + 'T00:00:00');
-          if (date.getMonth() === currentMonth && date.getFullYear() === currentYear) {
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            
-            if (shift.type === ShiftType.T1) stats.ti++;
-            else if (shift.type === ShiftType.Q1) stats.qi++;
-            else if (shift.type === ShiftType.PLAN) stats.plan++;
-            else if (shift.type === ShiftType.OFF) stats.folga++;
-            else if (shift.type === ShiftType.FINAL) stats.final++;
-
-            // Soma de horas para gráficos reais
-            if (!isWeekend && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(shift.type)) {
-              shift.activeSlots?.forEach(slot => {
-                if (slot === 'MORNING' || slot === 'AFTERNOON') stats.hours40 += 4;
-                else if (slot === 'NIGHT') stats.hours20 += 4;
-              });
-            }
-          }
-        });
-      }
-
-      return {
-        ...emp,
-        ...stats
-      };
-    });
-  }, [employees, schedules]);
-
-  // Dados para o Gráfico de Barras (Horas por Semana) - Agregado dos funcionários filtrados
-  const weeklyChartData = useMemo(() => {
-    const today = new Date();
-    const month = today.getMonth();
-    const year = today.getFullYear();
-    
-    const weeks = [
-      { name: 'Sem 1', hours: 0 },
-      { name: 'Sem 2', hours: 0 },
-      { name: 'Sem 3', hours: 0 },
-      { name: 'Sem 4', hours: 0 },
-    ];
-
-    employees.forEach(emp => {
-      const schedule = schedules.find(s => s.employeeId === emp.id);
-      if (schedule) {
-        Object.entries(schedule.shifts).forEach(([dateStr, shift]: [string, Shift]) => {
-          const date = new Date(dateStr + 'T00:00:00');
-          if (date.getMonth() === month && date.getFullYear() === year) {
-            const day = date.getDate();
-            const weekIdx = Math.min(3, Math.floor((day - 1) / 7));
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            
-            if (!isWeekend && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(shift.type)) {
-               weeks[weekIdx].hours += (shift.activeSlots?.length || 0) * 4;
-            }
-          }
-        });
-      }
-    });
-
-    return weeks;
-  }, [employees, schedules]);
-
-  // Dados para o Gráfico de Pizza (Distribuição de Contratos/Horas)
-  const contractDistribution = useMemo(() => {
+  const getStatsForMonth = (month: number, year: number) => {
     let h40 = 0;
     let h20 = 0;
-    monthlySummary.forEach(s => {
-      h40 += s.hours40;
-      h20 += s.hours20;
+    let producedHours = 0;
+    let hT1 = 0;
+    let hQ1 = 0;
+    let hPLAN = 0;
+    let hasShiftsInMonth = false;
+
+    const targetEmployees = isAdmin ? employees : employees.filter(e => schedules.some(s => s.employeeId === e.id));
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    targetEmployees.forEach(emp => {
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(year, month, d);
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+        
+        const m = checkActiveAssignment(emp.id, dateStr, 'MORNING', schedules);
+        const t = checkActiveAssignment(emp.id, dateStr, 'AFTERNOON', schedules);
+        const n = checkActiveAssignment(emp.id, dateStr, 'NIGHT', schedules);
+
+        if (m || t || n) hasShiftsInMonth = true;
+
+        if (!isWeekend) {
+          if (m && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(m.type)) {
+             h40 += 4; producedHours += 4;
+             if (m.type === ShiftType.T1) hT1 += 4; else if (m.type === ShiftType.Q1) hQ1 += 4; else hPLAN += 4;
+          }
+          if (t && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(t.type)) {
+             h40 += 4; producedHours += 4;
+             if (t.type === ShiftType.T1) hT1 += 4; else if (t.type === ShiftType.Q1) hQ1 += 4; else hPLAN += 4;
+          }
+          if (n && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(n.type)) {
+             h20 += 4; producedHours += 4;
+             if (n.type === ShiftType.T1) hT1 += 4; else if (n.type === ShiftType.Q1) hQ1 += 4; else hPLAN += 4;
+          }
+        }
+      }
     });
+
+    const g40 = h40 * hourlyRate;
+    const g20 = h20 * hourlyRate;
+    const totalGross = g40 + g20;
+
+    let businessDays = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+        if (isBusinessDay(new Date(year, month, d))) businessDays++;
+    }
     
-    // Fallback para não quebrar o gráfico se não houver dados
-    if (h40 === 0 && h20 === 0) return [
-      { name: 'Carga 40h', value: 1, color: '#00f3ff' },
-      { name: 'Carga 20h', value: 0, color: '#bc13fe' },
-    ];
+    const totalPotentialHours = businessDays * 12 * (isAdmin ? employees.length : 1);
+    const idleHours = Math.max(0, totalPotentialHours - producedHours);
 
-    return [
-      { name: 'Carga 40h', value: h40, color: '#00f3ff' },
-      { name: 'Carga 20h', value: h20, color: '#bc13fe' },
-    ];
-  }, [monthlySummary]);
+    const ir = isAdmin && totalGross > 0 ? (deductions['40H'].ir + deductions['20H'].ir) : 0;
+    const inss = isAdmin && totalGross > 0 ? (deductions['40H'].inss + deductions['20H'].inss) : 0;
+    const taxes = ir + inss;
+    const unimed = isAdmin && totalGross > 0 ? (deductions['40H'].unimed + deductions['20H'].unimed) : 0;
 
-  const renderGroup = (type: string, label: string, colorClass: string, icon: React.ReactNode) => {
-    const list = todayStatus[type] || [];
-    if (list.length === 0) return null;
-
-    return (
-        <div className="bg-slate-900/40 border border-white/5 rounded-xl p-4 space-y-4 hover:border-white/10 transition-all">
-            <div className={`flex items-center justify-between border-b border-white/5 pb-2`}>
-                <div className={`flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest ${colorClass}`}>
-                    {icon}
-                    {label}
-                </div>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colorClass.replace('text-', 'bg-').replace('-400', '-500/20')} ${colorClass}`}>
-                    {list.length}
-                </span>
-            </div>
-            <div className="flex flex-wrap gap-3">
-                {list.map(emp => (
-                    <div key={emp.id} className="group relative">
-                        <div className={`w-12 h-12 rounded-full border-2 p-0.5 transition-all group-hover:scale-110 group-hover:shadow-lg ${colorClass.replace('text-', 'border-')}`}>
-                            <img 
-                                src={emp.avatarUrl} 
-                                alt={emp.name}
-                                className="w-full h-full rounded-full object-cover"
-                            />
-                        </div>
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-sci-panel rounded-full flex items-center justify-center border border-white/10">
-                            <div className={`w-2 h-2 rounded-full animate-pulse ${colorClass.replace('text-', 'bg-')}`}></div>
-                        </div>
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-[10px] text-white rounded border border-white/10 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
-                            {emp.name}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+    return { 
+      totalGross, g40, g20, h40, h20, 
+      producedHours, hT1, hQ1, hPLAN,
+      idleHours, totalPotentialHours,
+      taxes, ir, inss, unimed, hasShifts: hasShiftsInMonth,
+      totalReal: Math.max(0, totalGross - taxes - unimed)
+    };
   };
+
+  const integratedData = useMemo(() => {
+    return ANNUAL_CR_2025.map(historyItem => {
+      const live = getStatsForMonth(historyItem.month, viewedYear);
+      if (live.hasShifts) {
+        return {
+          ...historyItem,
+          g40: live.g40, g20: live.g20, totalReal: live.totalReal,
+          totalDeductions: live.taxes, unimed: live.unimed,
+          source: 'REAL' as const
+        };
+      }
+      if (!isAdmin) return { ...historyItem, g40: 0, g20: 0, totalReal: 0, totalDeductions: 0, unimed: 0, source: 'INDIVIDUAL' as const };
+      return { ...historyItem, source: 'PREVISÃO' as const };
+    });
+  }, [schedules, viewedYear, hourlyRate, deductions, isAdmin, employees]);
+
+  const monthPerformance = useMemo(() => getStatsForMonth(viewedMonth, viewedYear), [schedules, viewedMonth, viewedYear, hourlyRate, deductions, employees, isAdmin]);
+
+  const totalAnnualReal = useMemo(() => integratedData.reduce((acc, curr) => acc + curr.totalReal, 0), [integratedData]);
+  const totalAnnualTaxes = useMemo(() => integratedData.reduce((acc, curr) => acc + curr.totalDeductions, 0), [integratedData]);
+  const totalAnnualUnimed = useMemo(() => integratedData.reduce((acc, curr) => acc + curr.unimed, 0), [integratedData]);
+  
+  const formatCurrency = (val: number) => `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
-      
-      {/* SEÇÃO 1: MONITORAMENTO EM TEMPO REAL */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3 ml-1">
-            <Activity className="text-cyan-400 w-5 h-5" />
-            <h2 className="text-xl font-bold text-white tracking-tight uppercase font-mono">
-              {isIndividual ? 'Meu Status Hoje' : 'Status Operacional Hoje'}
-            </h2>
-            <div className="h-px flex-1 bg-gradient-to-r from-cyan-500/30 to-transparent"></div>
-            <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Tempo Real</span>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-            {renderGroup(ShiftType.T1, 'Técnico (TI)', 'text-emerald-400', <UserCheck size={14}/>)}
-            {renderGroup(ShiftType.Q1, 'Qualidade (QI)', 'text-cyan-400', <Search size={14}/>)}
-            {renderGroup(ShiftType.PLAN, 'Planejamento', 'text-orange-400', <Clock size={14}/>)}
-            {renderGroup(ShiftType.FINAL, 'Plantão', 'text-white', <Users size={14}/>)}
-            {renderGroup(ShiftType.OFF, 'Folga', 'text-red-400', <Coffee size={14}/>)}
-        </div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-sci-panel/40 p-6 rounded-2xl border border-white/10 backdrop-blur-md">
+          <div className="flex items-center gap-6">
+              <div className="w-14 h-14 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
+                  <Activity className="text-cyan-400 animate-pulse w-7 h-7" />
+              </div>
+              <div>
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-2xl font-bold text-white uppercase font-mono tracking-tight">{isAdmin ? 'Análise Consolidada' : 'Meu Painel Financeiro'}</h2>
+                    <div className="flex items-center bg-slate-950 border border-white/10 rounded-xl p-1 shadow-inner">
+                        <button onClick={() => onDateChange(new Date(selectedDate.setFullYear(viewedYear - 1)))} className="p-2 hover:bg-white/5 text-slate-400 hover:text-white rounded transition-colors"><ChevronLeft size={20} /></button>
+                        <span className="px-5 text-lg font-mono font-bold text-cyan-400">{viewedYear}</span>
+                        <button onClick={() => onDateChange(new Date(selectedDate.setFullYear(viewedYear + 1)))} className="p-2 hover:bg-white/5 text-slate-400 hover:text-white rounded transition-colors"><ChevronRight size={20} /></button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                      <span className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded border border-emerald-400/20 uppercase font-bold tracking-wider">
+                          <CheckCircle className="w-4 h-4" /> {isAdmin ? 'Inteligência de Rede' : 'Extrato de Conta'}
+                      </span>
+                      <span className="text-xs font-mono text-slate-600">|</span>
+                      <span className="text-xs font-mono text-cyan-400 uppercase tracking-widest font-bold">Base: {formatCurrency(hourlyRate)}/h</span>
+                  </div>
+              </div>
+          </div>
+          <div className="flex items-center gap-6">
+              <div className="hidden xl:block text-right">
+                <p className="text-xs font-mono text-slate-500 uppercase tracking-widest font-bold mb-1">Saldo Líquido Anual</p>
+                <p className="text-3xl font-bold text-white font-mono leading-none">{formatCurrency(totalAnnualReal)}</p>
+              </div>
+          </div>
       </div>
 
-      {/* SEÇÃO 2: RESUMO MENSAL POR COLABORADOR */}
-      <NeonCard title={isIndividual ? "Meu Resumo Mensal de Atividades" : "Resumo Mensal de Equipe"} glowColor="purple" icon={<ClipboardList size={16} />}>
-        <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-                <thead>
-                    <tr className="border-b border-white/10 text-[10px] text-slate-500 font-mono uppercase tracking-widest bg-slate-900/30">
-                        <th className="p-4">Colaborador</th>
-                        <th className="p-4 text-center">TI (T1)</th>
-                        <th className="p-4 text-center">QI (Q1)</th>
-                        <th className="p-4 text-center">PLAN</th>
-                        <th className="p-4 text-center">FOLGAS</th>
-                        <th className="p-4 text-center">PLANTÕES</th>
-                        <th className="p-4 text-right">EFICIÊNCIA</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                    {monthlySummary.map((row) => {
-                        const totalActiveDays = row.ti + row.qi + row.plan;
-                        // Estimativa baseada em 20 dias úteis
-                        const efficiency = Math.min(100, (totalActiveDays / 20) * 100).toFixed(0);
-                        
-                        return (
-                            <tr key={row.id} className="hover:bg-white/5 transition-colors group">
-                                <td className="p-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full border border-white/10 overflow-hidden shadow-inner">
-                                            <img src={row.avatarUrl} className="w-full h-full object-cover" alt="" />
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-slate-200 group-hover:text-cyan-400 transition-colors">{row.name}</p>
-                                            <p className="text-[10px] text-slate-500 uppercase font-mono tracking-tighter">{row.role}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="p-4 text-center">
-                                    <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded border border-emerald-400/20">{row.ti}</span>
-                                </td>
-                                <td className="p-4 text-center">
-                                    <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded border border-cyan-400/20">{row.qi}</span>
-                                </td>
-                                <td className="p-4 text-center">
-                                    <span className="text-xs font-mono font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded border border-orange-400/20">{row.plan}</span>
-                                </td>
-                                <td className="p-4 text-center">
-                                    <span className="text-xs font-mono font-bold text-red-400 bg-red-400/10 px-2 py-1 rounded border border-red-400/20">{row.folga}</span>
-                                </td>
-                                <td className="p-4 text-center">
-                                    <span className="text-xs font-mono font-bold text-slate-300 bg-white/5 px-2 py-1 rounded border border-white/10">{row.final}</span>
-                                </td>
-                                <td className="p-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                        <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                                            <div 
-                                                className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]"
-                                                style={{ width: `${efficiency}%` }}
-                                            ></div>
-                                        </div>
-                                        <span className="text-[10px] font-mono text-slate-400">{efficiency}%</span>
-                                    </div>
-                                </td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-        </div>
-      </NeonCard>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <NeonCard glowColor="cyan" className="bg-cyan-500/5">
+              <div className="flex items-center gap-5">
+                  <div className="p-4 bg-cyan-500/10 rounded-2xl text-cyan-400"><DollarSign size={32} /></div>
+                  <div><p className="text-xs font-mono text-slate-500 uppercase tracking-widest font-bold mb-1">Receita Real {viewedYear}</p><p className="text-2xl font-bold text-white font-mono">{formatCurrency(totalAnnualReal)}</p></div>
+              </div>
+          </NeonCard>
+          <NeonCard glowColor="purple" className="bg-purple-500/5">
+              <div className="flex items-center gap-5">
+                  <div className="p-4 bg-purple-500/10 rounded-2xl text-purple-400"><Calculator size={32} /></div>
+                  <div><p className="text-xs font-mono text-slate-500 uppercase tracking-widest font-bold mb-1">Faturamento Bruto</p><p className="text-2xl font-bold text-white font-mono">{formatCurrency(integratedData.reduce((a,c) => a + c.g40 + c.g20, 0))}</p></div>
+              </div>
+          </NeonCard>
+          <NeonCard glowColor="orange" className="bg-red-500/5 border-red-500/10">
+              <div className="flex items-center gap-5">
+                  <div className="p-4 bg-red-500/10 rounded-2xl text-red-400"><MinusCircle size={32} /></div>
+                  <div><p className="text-xs font-mono text-slate-500 uppercase tracking-widest font-bold mb-1">Deduções Fiscais</p><p className="text-2xl font-bold text-red-400 font-mono">{formatCurrency(totalAnnualTaxes)}</p></div>
+              </div>
+          </NeonCard>
+          <NeonCard glowColor="none" className="bg-blue-500/5 border-blue-500/10">
+              <div className="flex items-center gap-5">
+                  <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-400"><ShieldCheck size={32} /></div>
+                  <div><p className="text-xs font-mono text-slate-500 uppercase tracking-widest font-bold mb-1">Plano Unimed</p><p className="text-2xl font-bold text-blue-400 font-mono">{formatCurrency(totalAnnualUnimed)}</p></div>
+              </div>
+          </NeonCard>
+      </div>
 
-      {/* SEÇÃO 3: GRÁFICOS ANALÍTICOS DINÂMICOS */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <NeonCard title={isIndividual ? "Minha Carga Horária Semanal" : "Carga Horária da Equipe"} glowColor="blue" icon={<BarChart3 size={16} />}>
-          <div className="h-[250px] w-full pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0b1221', borderColor: '#1e293b', color: '#f8fafc', borderRadius: '8px' }}
-                  itemStyle={{ color: '#00f3ff' }}
-                  cursor={{fill: 'rgba(255,255,255,0.03)'}}
-                />
-                <Bar dataKey="hours" name="Horas" fill="#2266ff" radius={[4, 4, 0, 0]} barSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </NeonCard>
-
-        <NeonCard title={isIndividual ? "Minha Distribuição de Carga" : "Distribuição de Contratos"} glowColor="purple" icon={<PieChartIcon size={16} />}>
-          <div className="h-[250px] w-full flex items-center justify-center relative pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={contractDistribution}
-                  innerRadius={70}
-                  outerRadius={95}
-                  paddingAngle={8}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {contractDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                   contentStyle={{ backgroundColor: '#0b1221', borderColor: '#1e293b', color: '#f8fafc', borderRadius: '8px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-3xl font-bold text-white tracking-tighter">RIOS</span>
-              <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Analytics</span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <div className="bg-sci-panel/60 backdrop-blur-md rounded-2xl border border-white/10 p-8 shadow-2xl relative overflow-hidden h-full group">
+                <div className="relative z-10 space-y-8">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-cyan-500/10 rounded-xl text-cyan-400 border border-cyan-500/20"><Landmark className="w-6 h-6" /></div>
+                        <div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tight">Fluxo Financeiro Mensal ({selectedDate.toLocaleString('pt-BR', { month: 'short' }).toUpperCase()})</h3>
+                        </div>
+                    </div>
+                    <div className="space-y-5">
+                        <div className="flex items-center justify-between p-5 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
+                            <div className="flex items-center gap-5">
+                                <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400"><ArrowUpRight size={24}/></div>
+                                <div>
+                                    <p className="text-xs font-mono text-slate-500 uppercase font-black tracking-widest">Ganhos Brutos do Período</p>
+                                    <p className="text-lg font-black text-white">{monthPerformance.producedHours} Horas Faturadas</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-2xl font-black text-emerald-400 font-mono">+{formatCurrency(monthPerformance.totalGross)}</p>
+                            </div>
+                        </div>
+                        <div className="p-6 bg-slate-950 rounded-2xl border-2 border-cyan-500/30 flex items-center justify-between shadow-neon-cyan/10">
+                            <div>
+                                <p className="text-sm font-black text-cyan-400 uppercase tracking-widest">Net Mensal Estimado</p>
+                            </div>
+                            <p className="text-4xl font-black text-white font-mono tracking-tighter">{formatCurrency(monthPerformance.totalReal)}</p>
+                        </div>
+                    </div>
+                </div>
             </div>
           </div>
-        </NeonCard>
+          <div className="lg:col-span-1">
+              <div className="bg-sci-panel/60 backdrop-blur-md rounded-2xl border border-white/10 p-8 shadow-2xl h-full flex flex-col group">
+                  <div className="flex items-center gap-4 mb-8">
+                      <div className="p-3 bg-purple-500/10 rounded-xl text-purple-400 border border-purple-500/20"><PieIcon size={24} /></div>
+                      <h3 className="text-xl font-black text-white uppercase tracking-tight">Composição</h3>
+                  </div>
+                  <div className="flex-1 h-64 min-h-[250px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                              <Pie
+                                  data={[
+                                      { name: 'Líquido', value: monthPerformance.totalReal, color: '#00f3ff' },
+                                      { name: 'Impostos', value: monthPerformance.taxes, color: '#ef4444' },
+                                      { name: 'Unimed', value: monthPerformance.unimed, color: '#3b82f6' }
+                                  ]}
+                                  innerRadius={70}
+                                  outerRadius={95}
+                                  paddingAngle={5}
+                                  dataKey="value"
+                              >
+                                  <Cell fill="#00f3ff" />
+                                  <Cell fill="#ef4444" />
+                                  <Cell fill="#3b82f6" />
+                              </Pie>
+                              <Tooltip 
+                                  contentStyle={{ backgroundColor: '#0b1221', borderColor: '#1e293b', borderRadius: '12px' }}
+                                  formatter={(value: number) => [formatCurrency(value), '']}
+                              />
+                          </PieChart>
+                      </ResponsiveContainer>
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      <div className="bg-sci-panel/60 backdrop-blur-md rounded-2xl border border-white/10 p-8 shadow-2xl relative overflow-hidden group">
+          <div className="relative z-10 space-y-10">
+              <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                      <div className="p-3 bg-purple-500/10 rounded-xl text-purple-400 border border-purple-500/20"><Hourglass className="w-6 h-6" /></div>
+                      <h3 className="text-xl font-black text-white uppercase tracking-tight">Equilíbrio Operacional do Mês</h3>
+                  </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+                  <div className="space-y-6">
+                      <div className="flex justify-between items-end">
+                          <div>
+                              <p className="text-xs font-mono text-slate-500 uppercase font-black tracking-widest mb-1">Horas Produzidas (Total)</p>
+                              <p className="text-5xl font-black text-emerald-400 font-mono tracking-tighter">{monthPerformance.producedHours} <small className="text-sm opacity-60">H</small></p>
+                          </div>
+                      </div>
+                      <div className="h-4 w-full bg-slate-900 rounded-full overflow-hidden border border-white/5 p-1 shadow-inner relative">
+                          <div className="h-full bg-gradient-to-r from-emerald-600 to-cyan-400 rounded-full shadow-neon-cyan transition-all duration-1000" style={{ width: `${(monthPerformance.producedHours / (monthPerformance.totalPotentialHours || 1)) * 100}%` }}></div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4 pt-4">
+                          <div className="bg-emerald-500/5 border border-emerald-500/20 p-4 rounded-xl">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">T1</span>
+                              <p className="text-xl font-black text-white font-mono">{monthPerformance.hT1}h</p>
+                          </div>
+                          <div className="bg-cyan-500/5 border border-cyan-500/20 p-4 rounded-xl">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400">Q1</span>
+                              <p className="text-xl font-black text-white font-mono">{monthPerformance.hQ1}h</p>
+                          </div>
+                          <div className="bg-orange-500/5 border border-orange-500/20 p-4 rounded-xl">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-orange-400">PLAN</span>
+                              <p className="text-xl font-black text-white font-mono">{monthPerformance.hPLAN}h</p>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="space-y-6">
+                      <div className="flex justify-between items-end">
+                          <div>
+                              <p className="text-xs font-mono text-slate-500 uppercase font-black tracking-widest mb-1">Horas Ociosas</p>
+                              <p className="text-5xl font-black text-red-500 font-mono tracking-tighter">{monthPerformance.idleHours} <small className="text-sm opacity-60">H</small></p>
+                          </div>
+                      </div>
+                      <div className="h-4 w-full bg-slate-900 rounded-full overflow-hidden border border-white/5 p-1 shadow-inner relative">
+                          <div className="h-full bg-gradient-to-r from-red-600 to-orange-500 rounded-full shadow-neon-orange transition-all duration-1000" style={{ width: `${(monthPerformance.idleHours / (monthPerformance.totalPotentialHours || 1)) * 100}%` }}></div>
+                      </div>
+                  </div>
+              </div>
+          </div>
       </div>
     </div>
   );

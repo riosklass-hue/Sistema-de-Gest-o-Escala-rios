@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# SGE Rios - Sistema de Gestão de Escalas
+# Dashboard Futurista
