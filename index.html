@@ -1,5 +1,6 @@
+
 <!DOCTYPE html>
-<html lang="pt-BR" style="font-size: 110%;">
+<html lang="pt-BR" style="font-size: 100%;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -52,6 +53,12 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #334155; 
+      }
+      
+      /* Smooth transitions for zoom effect */
+      .zoom-container {
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transform-origin: top center;
       }
     </style>
   <script type="importmap">

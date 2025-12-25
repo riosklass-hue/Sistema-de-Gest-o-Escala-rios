@@ -19,6 +19,9 @@ export interface User {
 export interface Employee {
   id: string;
   name: string;
+  registration?: string; // Número de Matrícula
+  birthDate?: string;    // Data de Nascimento
+  contractExpiration?: string; // Vencimento do Contrato
   username?: string; // Linked system login
   email?: string;
   phone?: string;
@@ -28,6 +31,21 @@ export interface Employee {
   active: boolean; 
   skills?: string[]; // Cursos que domina
   qualifications?: string; // Titulações e formações
+}
+
+export interface ClassGroup {
+  id: string;
+  name: string;
+  type: 'Técnico' | 'Qualificação';
+  courseGroupName?: string; // Vínculo com o Grupo de Curso
+  startDate: string;
+  endDate: string;
+}
+
+export interface CourseGroup {
+  id: string;
+  name: string;
+  courses: string[];
 }
 
 export interface SystemLog {
@@ -64,14 +82,16 @@ export interface GroupPermission {
 export interface Shift {
   date: string; // YYYY-MM-DD
   type: ShiftType;
-  courseName?: string; // Mantido para compatibilidade (Resumo)
+  courseName?: string; 
   slotDetails?: Record<string, { 
     courseName?: string;
-    schoolName?: string; // Unidade de ensino
+    turmaName?: string;
+    schoolName?: string; 
     startDateStr?: string;
     endDateStr?: string;
     totalHours?: number;
-  }>; // Detalhes específicos por slot (MORNING, etc)
+    isCancelled?: boolean;
+  }>;
   startTime?: string;
   endTime?: string;
   totalCourseHours?: number;

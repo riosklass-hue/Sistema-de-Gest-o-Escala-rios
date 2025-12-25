@@ -4,11 +4,11 @@ import { User, Shield, Zap, Database, Activity } from 'lucide-react';
 import React from 'react';
 
 export const INITIAL_EMPLOYEES: Employee[] = [
-  { id: '1', name: 'Ana Silva', username: 'ana.silva', role: 'Engenheira Sênior', userRole: 'TEACHER', avatarUrl: 'https://picsum.photos/100/100?random=1', active: true },
-  { id: '2', name: 'Carlos Mendes', username: 'carlos.mendes', role: 'Técnico Líder', userRole: 'COORDINATOR', avatarUrl: 'https://picsum.photos/100/100?random=2', active: true },
-  { id: '3', name: 'Marina Costa', username: 'marina.costa', role: 'Analista de Dados', userRole: 'SUPERVISOR', avatarUrl: 'https://picsum.photos/100/100?random=3', active: true },
-  { id: '4', name: 'João Santos', username: 'joao.santos', role: 'Operador T1', userRole: 'TEACHER', avatarUrl: 'https://picsum.photos/100/100?random=4', active: true },
-  { id: '5', name: 'Beatriz Lima', username: 'beatriz.lima', role: 'Planejamento', userRole: 'ADMIN', avatarUrl: 'https://picsum.photos/100/100?random=5', active: true },
+  { id: '1', name: 'Ana Silva', registration: '2025001', birthDate: '1990-05-15', contractExpiration: '2026-12-31', username: 'ana.silva', role: 'Engenheira Sênior', userRole: 'TEACHER', avatarUrl: 'https://picsum.photos/100/100?random=1', active: true, phone: '(69) 99200-1122', email: 'ana.silva@rios.com.br' },
+  { id: '2', name: 'Carlos Mendes', registration: '2025002', birthDate: '1985-11-20', contractExpiration: '2026-06-30', username: 'carlos.mendes', role: 'Técnico Líder', userRole: 'COORDINATOR', avatarUrl: 'https://picsum.photos/100/100?random=2', active: true, phone: '(69) 99200-3344', email: 'carlos.mendes@rios.com.br' },
+  { id: '3', name: 'Marina Costa', registration: '2025003', birthDate: '1992-03-10', contractExpiration: '2027-01-15', username: 'marina.costa', role: 'Analista de Dados', userRole: 'SUPERVISOR', avatarUrl: 'https://picsum.photos/100/100?random=3', active: true, phone: '(69) 99200-5566', email: 'marina.costa@rios.com.br' },
+  { id: '4', name: 'João Santos', registration: '2025004', birthDate: '1988-07-25', contractExpiration: '2025-12-20', username: 'joao.santos', role: 'Operador T1', userRole: 'TEACHER', avatarUrl: 'https://picsum.photos/100/100?random=4', active: true, phone: '(69) 99200-7788', email: 'joao.santos@rios.com.br' },
+  { id: '5', name: 'Beatriz Lima', registration: '2025005', birthDate: '1995-12-30', contractExpiration: '2026-10-10', username: 'beatriz.lima', role: 'Planejamento', userRole: 'ADMIN', avatarUrl: 'https://picsum.photos/100/100?random=5', active: true, phone: '(69) 99200-9900', email: 'beatriz.lima@rios.com.br' },
 ];
 
 // DADOS CONSOLIDADOS DA PLANILHA "2025 CR"

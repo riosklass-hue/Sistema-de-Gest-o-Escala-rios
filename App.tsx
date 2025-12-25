@@ -8,9 +8,9 @@ import LoginScreen from './components/LoginScreen';
 import RegistrationPanel from './components/RegistrationPanel';
 import SystemPanel from './components/SystemPanel';
 import { INITIAL_EMPLOYEES } from './constants';
-import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut, Activity, User as UserIcon, Database, Shield, Zap, UserPlus, LayoutDashboard, CalendarRange, FileBarChart, ShieldAlert } from 'lucide-react';
+import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut, Activity, User as UserIcon, Database, Shield, Zap, UserPlus, LayoutDashboard, CalendarRange, FileBarChart, ShieldAlert, X, Minus, Plus, RotateCcw } from 'lucide-react';
 import NeonCard from './components/NeonCard';
-import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole } from './types';
+import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole, ClassGroup, CourseGroup } from './types';
 import { generateSmartSchedule } from './services/geminiService';
 import { syncUserRecord } from './services/authService';
 
@@ -62,11 +62,14 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('Escalas');
   const [insight, setInsight] = useState<string>('');
+  const [zoomLevel, setZoomLevel] = useState(75); 
   
   const [viewedDate, setViewedDate] = useState(new Date());
   const [hourlyRate, setHourlyRate] = useState(32.00);
   
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+  const [classes, setClasses] = useState<ClassGroup[]>([]);
+  const [courseGroups, setCourseGroups] = useState<CourseGroup[]>([]);
   const [availableCourses, setAvailableCourses] = useState<string[]>([
     "Eletrotécnica", "Mecânica", "Automação", "Informática", 
     "Segurança do Trabalho", "Energias Renováveis", "Gestão Industrial", 
@@ -77,7 +80,7 @@ const App: React.FC = () => {
   ]);
   const [globalSchedules, setGlobalSchedules] = useState<Schedule[]>([]);
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(INITIAL_PERMISSIONS);
-
+  
   const [logs, setLogs] = useState<SystemLog[]>([
     { id: 'l1', user: 'admin', description: 'Sistema inicializado', module: 'NÚCLEO', action: 'STARTUP', ip: '127.0.0.1', entryTime: '20/12/2025 08:00:00', exitTime: '20/12/2025 18:00:00', active: false },
   ]);
@@ -103,6 +106,7 @@ const App: React.FC = () => {
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     addLog(user.username, 'LOGIN', 'USUÁRIOS', 'Acesso autorizado ao SGE');
+    if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   const handleLogout = () => {
@@ -114,6 +118,14 @@ const App: React.FC = () => {
   const handleSavePermissions = (newPermissions: Record<UserRole, GroupPermission>) => {
     setPermissions(newPermissions);
     if (currentUser) addLog(currentUser.username, 'PERMISSÕES', 'SISTEMA', 'Vínculos de acesso de grupo atualizados');
+  };
+
+  const adjustZoom = (delta: number) => {
+    setZoomLevel(prev => Math.min(Math.max(prev + delta, 50), 150));
+  };
+
+  const resetZoom = () => {
+    setZoomLevel(75); 
   };
 
   useEffect(() => {
@@ -157,12 +169,12 @@ const App: React.FC = () => {
     if (!currentUser) return [];
     const rolePerms = permissions[currentUser.role].modules;
     return [
-      { label: 'Dashboard', icon: <Activity className="w-6 h-6" />, visible: rolePerms.dashboard.visualize },
-      { label: 'Cadastro', icon: <UserPlus className="w-6 h-6" />, visible: rolePerms.cadastro.visualize },
-      { label: 'Escalas', icon: <UserIcon className="w-6 h-6" />, visible: rolePerms.escalas.visualize },
-      { label: 'Relatórios', icon: <Database className="w-6 h-6" />, visible: rolePerms.relatorios.visualize },
-      { label: 'Segurança', icon: <Shield className="w-6 h-6" />, visible: rolePerms.seguranca.visualize },
-      { label: 'Sistema', icon: <Zap className="w-6 h-6" />, visible: currentUser.role === 'ADMIN' },
+      { label: 'Dashboard', icon: <Activity className="w-5 h-5" />, visible: rolePerms.dashboard.visualize },
+      { label: 'Cadastro', icon: <UserPlus className="w-5 h-5" />, visible: rolePerms.cadastro.visualize },
+      { label: 'Escalas', icon: <CalendarRange className="w-5 h-5" />, visible: rolePerms.escalas.visualize },
+      { label: 'Relatórios', icon: <Database className="w-5 h-5" />, visible: rolePerms.relatorios.visualize },
+      { label: 'Segurança', icon: <Shield className="w-5 h-5" />, visible: rolePerms.seguranca.visualize },
+      { label: 'Sistema', icon: <Zap className="w-5 h-5" />, visible: currentUser.role === 'ADMIN' },
     ].filter(item => item.visible);
   }, [currentUser, permissions]);
 
@@ -183,55 +195,117 @@ const App: React.FC = () => {
       </div>
 
       <div className="relative z-10 flex h-screen overflow-hidden">
-        <aside className={`${isSidebarOpen ? 'w-72' : 'w-24'} bg-sci-panel/90 backdrop-blur-xl border-r border-white/10 transition-all duration-300 flex flex-col justify-between hidden md:flex`}>
+        {isSidebarOpen && (
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] md:hidden transition-opacity duration-300"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+
+        <aside className={`
+          fixed md:relative z-[100] h-full
+          ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full md:translate-x-0 md:w-20'} 
+          bg-sci-panel/95 md:bg-sci-panel/90 backdrop-blur-xl border-r border-white/10 
+          transition-all duration-300 flex flex-col justify-between
+        `}>
           <div>
-            <div className="h-20 flex items-center justify-center border-b border-white/10">
-              <Hexagon className="text-cyan-400 w-10 h-10 animate-spin-slow" />
-              {isSidebarOpen && <span className="ml-4 font-mono font-bold text-xl tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">RIOS</span>}
+            <div className="h-20 flex items-center justify-between px-6 border-b border-white/10">
+              <div className="flex items-center">
+                <Hexagon className="text-cyan-400 w-8 h-8 animate-spin-slow" />
+                {(isSidebarOpen || window.innerWidth < 768) && (
+                  <span className="ml-3 font-mono font-black text-lg tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">RIOS</span>
+                )}
+              </div>
+              <button 
+                onClick={() => setIsSidebarOpen(false)} 
+                className="md:hidden p-2 text-slate-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
             </div>
-            <nav className="p-4 space-y-3">
+            <nav className="p-3 space-y-2">
               {menuItems.map((item, idx) => (
-                <button key={idx} onClick={() => setActiveTab(item.label)} className={`w-full flex items-center p-4 rounded-xl transition-all group ${activeTab === item.label ? 'bg-gradient-to-r from-cyan-900/50 to-transparent border-l-4 border-cyan-400 text-cyan-300' : 'hover:bg-white/5 text-slate-400 hover:text-white'}`}>
-                  <div className={`${activeTab === item.label ? 'text-cyan-400 shadow-[0_0_10px_rgba(0,243,255,0.4)]' : ''}`}>{item.icon}</div>
-                  {isSidebarOpen && <span className="ml-4 font-semibold text-base">{item.label}</span>}
+                <button 
+                  key={idx} 
+                  onClick={() => {
+                    setActiveTab(item.label);
+                    if (window.innerWidth < 768) setIsSidebarOpen(false);
+                  }} 
+                  className={`
+                    w-full flex items-center p-3.5 rounded-xl transition-all group 
+                    ${activeTab === item.label ? 'bg-gradient-to-r from-cyan-900/30 to-transparent border-l-4 border-cyan-400 text-cyan-300 shadow-[inset_0_0_15px_rgba(0,243,255,0.05)]' : 'hover:bg-white/5 text-slate-500 hover:text-white'}
+                  `}
+                >
+                  <div className={`${activeTab === item.label ? 'text-cyan-400 drop-shadow-[0_0_8px_rgba(0,243,255,0.4)]' : ''}`}>
+                    {item.icon}
+                  </div>
+                  {(isSidebarOpen || window.innerWidth < 768) && (
+                    <span className="ml-3 font-bold text-sm uppercase tracking-tighter">{item.label}</span>
+                  )}
                 </button>
               ))}
             </nav>
           </div>
-          <div className="p-4 border-t border-white/10">
-            {isSidebarOpen && (
-              <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+          <div className="p-3 border-t border-white/10">
+            {(isSidebarOpen || window.innerWidth < 768) && (
+              <div className="bg-slate-900/40 p-3 rounded-xl border border-white/5 flex items-center justify-between">
                 <div className="overflow-hidden">
-                    <p className="text-xs font-mono text-slate-500 mb-1 uppercase tracking-tight">Vínculo Ativo</p>
+                    <p className="text-[10px] font-mono text-slate-500 mb-0.5 uppercase tracking-tighter">Ativo</p>
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-white font-mono truncate font-bold">{currentUser.username}</span>
+                        <span className="text-xs text-white font-mono truncate font-black uppercase">{currentUser.username}</span>
                     </div>
                 </div>
-                <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-red-400 transition-colors"><LogOut size={20} /></button>
+                <button onClick={handleLogout} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors">
+                  <LogOut size={16} />
+                </button>
               </div>
             )}
           </div>
         </aside>
 
         <main className="flex-1 flex flex-col overflow-hidden relative">
-          <header className="h-20 bg-sci-panel/50 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-8">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-400 hover:text-white md:hidden"><Menu size={24} /></button>
-            <div className="hidden lg:block overflow-hidden w-full max-w-xl relative h-6">
+          <header className="h-20 bg-sci-panel/50 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-6 md:px-8">
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setIsSidebarOpen(true)} 
+                className={`p-2 text-slate-400 hover:text-white md:hidden ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+              >
+                <Menu size={24} />
+              </button>
+              
+              <div className="hidden sm:flex items-center bg-[#1a1412] text-slate-300 px-4 py-1.5 rounded-full border border-white/5 gap-4 shadow-xl">
+                  <span className="text-sm font-mono font-bold min-w-[3ch]">{zoomLevel}%</span>
+                  <div className="flex items-center gap-1">
+                      <button onClick={() => adjustZoom(-5)} className="p-1 hover:bg-white/10 rounded transition-colors" title="Diminuir">
+                          <Minus size={14} />
+                      </button>
+                      <button onClick={() => adjustZoom(5)} className="p-1 hover:bg-white/10 rounded transition-colors" title="Aumentar">
+                          <Plus size={14} />
+                      </button>
+                  </div>
+                  <button onClick={resetZoom} className="px-3 py-0.5 text-xs font-bold border border-white/10 rounded-full hover:bg-white/5 transition-colors">
+                      Redefinir
+                  </button>
+              </div>
+            </div>
+            
+            <div className="hidden lg:block overflow-hidden w-full max-w-sm relative h-6 mx-4">
                 <p className="absolute w-full text-sm font-mono text-cyan-500/80 whitespace-nowrap animate-marquee font-semibold">{insight}</p>
             </div>
-            <div className="flex items-center gap-6">
+
+            <div className="flex items-center gap-3 md:gap-6">
                 <div className="text-right hidden sm:block">
                     <p className="text-sm font-bold text-white tracking-wide">{currentUser.name}</p>
                     <p className="text-xs text-slate-400 uppercase tracking-widest font-mono">{currentUser.role}</p>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-500 p-[2px]">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-500 p-[2px] shadow-neon-cyan/20">
                     <img src={`https://ui-avatars.com/api/?name=${currentUser.name}&background=0b1221&color=fff`} alt="User" className="rounded-full w-full h-full border-2 border-sci-panel" />
                 </div>
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-10">
-            <div className="max-w-7xl mx-auto space-y-8">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8">
+            <div className="max-w-full mx-auto zoom-container" style={{ zoom: `${zoomLevel}%` }}>
                {activeTab === 'Dashboard' && currentRolePermissions.dashboard.visualize && (
                   <StatsPanel 
                     isAdmin={currentUser.role === 'ADMIN'}
@@ -246,7 +320,9 @@ const App: React.FC = () => {
                     onRegisterEmployee={handleRegisterEmployee} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} 
                     employees={employees} availableCourses={availableCourses} onUpdateCourses={setAvailableCourses} 
                     schools={schools} onUpdateSchools={setSchools}
-                    permission={currentRolePermissions.cadastro} // Passagem das permissões
+                    classes={classes} onUpdateClasses={setClasses}
+                    courseGroups={courseGroups} onUpdateCourseGroups={setCourseGroups}
+                    permission={currentRolePermissions.cadastro} 
                   />
                )}
 
@@ -256,14 +332,23 @@ const App: React.FC = () => {
                     deductions={globalDeductions} externalDate={viewedDate} onDateChange={setViewedDate}
                     hourlyRate={hourlyRate} onHourlyRateChange={setHourlyRate} availableCourses={availableCourses} 
                     schools={schools}
-                    permission={currentRolePermissions.escalas} // Passagem das permissões
+                    classes={classes}
+                    permission={currentRolePermissions.escalas}
+                    isAdmin={currentUser.role === 'ADMIN' || currentUser.role === 'COORDINATOR'}
                   />
                )}
 
                {activeTab === 'Relatórios' && currentRolePermissions.relatorios.visualize && (
                   <ReportsPanel 
-                    filterEmployeeId={filterEmployeeId} employees={activeEmployees} schedules={globalSchedules} initialDeductions={globalDeductions} 
-                    onSaveDeductions={setGlobalDeductions} hourlyRate={hourlyRate} selectedDate={viewedDate}
+                    filterEmployeeId={filterEmployeeId} 
+                    employees={activeEmployees} 
+                    schedules={globalSchedules} 
+                    initialDeductions={globalDeductions} 
+                    onSaveDeductions={setGlobalDeductions} 
+                    hourlyRate={hourlyRate} 
+                    selectedDate={viewedDate}
+                    classes={classes}
+                    courseGroups={courseGroups}
                   />
                )}
 
