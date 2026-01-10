@@ -235,7 +235,6 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({
         for (let day = 1; day <= daysInCurrentMonth; day++) {
             const dateObj = new Date(year, month, day);
             const dateStr = formatDateStr(dateObj);
-            // Defaulting weekends/holidays to FINAL if not already set by AI or user
             if (!isWorkingDay(dateObj) && !shifts[dateStr]) {
                 shifts[dateStr] = { date: dateStr, type: ShiftType.FINAL, activeSlots: [], courseName: 'Fim de Semana' };
             }
@@ -387,67 +386,42 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({
     const month = currentDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-    try {
-      // Pass the current state as context to help AI fill only gaps
-      const aiData = await generateSmartSchedule(
-          displayedEmployees, 
-          year, 
-          month + 1,
-          schedules.map(s => ({ 
-              empId: s.employeeId, 
-              filledDays: Object.keys(s.shifts).filter(k => s.shifts[k].type !== ShiftType.FINAL) 
-          }))
-      );
+    // Conforme solicitação: Sincronizar para preencher os dias não digitados (espaços em branco) como FOLGA (OFF)
+    // Inclusive transformando finais de semana vazios em FOLGA
+    setSchedules(prev => {
+        const newSchedules = [...prev];
+        displayedEmployees.forEach(emp => {
+            const existingEmpSch = prev.find(s => s.employeeId === emp.id);
+            const shifts: Record<string, any> = existingEmpSch ? { ...existingEmpSch.shifts } : {};
 
-      if (aiData && aiData.length > 0) {
-        setSchedules(prev => {
-            const newSchedules = [...prev];
-            displayedEmployees.forEach(emp => {
-                const empAiData = aiData.find((d: any) => d.employeeName === emp.name) || aiData.find((d:any) => d.employeeId === emp.id);
-                const existingEmpSch = prev.find(s => s.employeeId === emp.id);
-                const shifts: Record<string, any> = existingEmpSch ? { ...existingEmpSch.shifts } : {};
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateObj = new Date(year, month, day);
+                const dayStr = formatDateStr(dateObj);
+                
+                // Consideramos "espaço em branco" se não houver shift ou se for o placeholder de FINAL DE SEMANA
+                const isBlank = !shifts[dayStr] || shifts[dayStr].type === ShiftType.FINAL;
 
-                // Loop through all days to apply AI suggestions to BLANK spaces
-                for (let day = 1; day <= daysInMonth; day++) {
-                    const dateObj = new Date(year, month, day);
-                    const dayStr = formatDateStr(dateObj);
-                    const isWd = isWorkingDay(dateObj);
-
-                    // USER REQUEST: Maintain data already done
-                    // Only fill if it's empty OR if it's the default FINAL type (which represents a placeholder)
-                    const isBlank = !shifts[dayStr] || shifts[dayStr].type === ShiftType.FINAL;
-
-                    if (isBlank) {
-                        if (!isWd) {
-                            // USER REQUEST: Weekend filled as Folga (OFF)
-                            shifts[dayStr] = { date: dayStr, type: ShiftType.OFF, activeSlots: [], courseName: 'Folga FDS' };
-                        } else {
-                            // Working day - find AI suggestion
-                            const aiDay = empAiData?.shifts?.find((s: any) => s.day === day);
-                            if (aiDay) {
-                                const defaultSlots: ('MORNING' | 'AFTERNOON' | 'NIGHT')[] = aiDay.type === ShiftType.OFF ? [] : ['MORNING', 'AFTERNOON'];
-                                shifts[dayStr] = { 
-                                    date: dayStr, 
-                                    type: aiDay.type, 
-                                    activeSlots: defaultSlots, 
-                                    courseName: availableCourses[Math.floor(Math.random() * availableCourses.length)] 
-                                };
-                            }
-                        }
-                    }
+                if (isBlank) {
+                    shifts[dayStr] = { 
+                        date: dayStr, 
+                        type: ShiftType.OFF, 
+                        activeSlots: [], 
+                        courseName: 'Folga Automática' 
+                    };
                 }
+            }
 
-                const index = newSchedules.findIndex(s => s.employeeId === emp.id);
-                if (index !== -1) newSchedules[index] = { ...newSchedules[index], shifts };
-            });
-            return newSchedules;
+            const index = newSchedules.findIndex(s => s.employeeId === emp.id);
+            if (index !== -1) newSchedules[index] = { ...newSchedules[index], shifts };
         });
-      }
-    } catch (e) { 
-        console.error(e); 
-    } finally { 
-        setLoading(false); 
-    }
+        return newSchedules;
+    });
+
+    // Simula um pequeno atraso para efeito visual de "processamento"
+    await new Promise(resolve => setTimeout(resolve, 800));
+    setLoading(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const handleSaveSystem = () => {

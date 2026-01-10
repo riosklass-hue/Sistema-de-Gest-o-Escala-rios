@@ -49,6 +49,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [localFilterId, setLocalFilterId] = useState<string | 'ALL'>('ALL');
   const [annualReportYear, setAnnualReportYear] = useState(2025);
+  const [auditStatusFilter, setAuditStatusFilter] = useState<string>('ALL');
   
   const [deductions, setDeductions] = useState<Record<string, DeductionState>>(initialDeductions || {
     '40H': { ir: 0, inss: 0, unimed: 0 },
@@ -293,6 +294,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
     return stats;
   }, [currentTargetEmployees, schedules, selectedDate, checkActiveAssignment, getCourseStatus]);
 
+  const filteredDetailedCourses = useMemo(() => {
+    if (auditStatusFilter === 'ALL') return courseStats.detailed;
+    return courseStats.detailed.filter(c => c.status === auditStatusFilter);
+  }, [courseStats.detailed, auditStatusFilter]);
+
   // Auditoria por Grupo de Cursos
   const courseGroupAudit = useMemo(() => {
     return classes.map(cls => {
@@ -437,9 +443,28 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
       {activeTab === 'COURSES' && (
         <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
             {/* SUBMENU AUDITORIA */}
-            <div className="flex bg-slate-950/60 p-1 rounded-xl border border-white/5 w-fit">
-                <button onClick={() => setCoursesSubTab('ANALYTIC')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${coursesSubTab === 'ANALYTIC' ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-500 hover:text-slate-400'}`}>Analítico Individual</button>
-                <button onClick={() => setCoursesSubTab('GROUPS')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${coursesSubTab === 'GROUPS' ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-500 hover:text-slate-400'}`}>Progresso por Turma</button>
+            <div className="flex flex-col sm:flex-row items-center gap-4 bg-sci-panel/60 p-1.5 rounded-2xl border border-white/5 w-fit">
+                <div className="flex bg-slate-950/60 p-1 rounded-xl border border-white/5">
+                    <button onClick={() => setCoursesSubTab('ANALYTIC')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${coursesSubTab === 'ANALYTIC' ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-500 hover:text-slate-400'}`}>Analítico Individual</button>
+                    <button onClick={() => setCoursesSubTab('GROUPS')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${coursesSubTab === 'GROUPS' ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-500 hover:text-slate-400'}`}>Progresso por Turma</button>
+                </div>
+                
+                {coursesSubTab === 'ANALYTIC' && (
+                  <div className="flex items-center gap-2 px-4 border-l border-white/10 ml-2">
+                      <span className="text-[9px] font-mono text-slate-500 uppercase font-black">Filtrar Auditoria:</span>
+                      <select 
+                        value={auditStatusFilter} 
+                        onChange={(e) => setAuditStatusFilter(e.target.value)}
+                        className="bg-slate-900 border border-white/10 rounded-lg px-3 py-1.5 text-[9px] font-black text-white focus:outline-none focus:border-purple-500/50 uppercase cursor-pointer"
+                      >
+                          <option value="ALL">Todos Status</option>
+                          <option value="completed">Completados</option>
+                          <option value="ongoing">Em Andamento</option>
+                          <option value="open">Abertos</option>
+                          <option value="cancelled">Cancelados</option>
+                      </select>
+                  </div>
+                )}
             </div>
 
             {coursesSubTab === 'ANALYTIC' ? (
@@ -462,7 +487,7 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {courseStats.detailed.map((course, idx) => (
+                                    {filteredDetailedCourses.length > 0 ? filteredDetailedCourses.map((course, idx) => (
                                         <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-all">
                                             <td className="p-4 flex items-center gap-3">
                                                 <div className={`p-2 rounded-lg ${course.type === ShiftType.T1 ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
@@ -487,7 +512,11 @@ const ReportsPanel: React.FC<ReportsPanelProps> = ({
                                                 </span>
                                             </td>
                                         </tr>
-                                    ))}
+                                    )) : (
+                                      <tr>
+                                        <td colSpan={6} className="p-10 text-center text-slate-600 font-mono text-xs uppercase font-black">Nenhum registro encontrado com este status</td>
+                                      </tr>
+                                    )}
                                 </tbody>
                             </table>
                         </div>

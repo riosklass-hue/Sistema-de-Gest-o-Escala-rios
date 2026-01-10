@@ -16,10 +16,20 @@ import {
   Info,
   Save,
   CheckCircle,
-  Loader2
+  Loader2,
+  Github,
+  Cloud,
+  CloudUpload,
+  Database,
+  Eye,
+  EyeOff,
+  RefreshCcw,
+  AlertTriangle,
+  ExternalLink,
+  DownloadCloud
 } from 'lucide-react';
 import NeonCard from './NeonCard';
-import { GroupPermission, UserRole, ModulePermission } from '../types';
+import { GroupPermission, UserRole, ModulePermission, GitHubConfig } from '../types';
 
 const ROLES: { id: UserRole; label: string }[] = [
   { id: 'ADMIN', label: 'Administradores' },
@@ -31,18 +41,34 @@ const ROLES: { id: UserRole; label: string }[] = [
 interface SystemPanelProps {
   initialPermissions: Record<UserRole, GroupPermission>;
   onSave: (permissions: Record<UserRole, GroupPermission>) => void;
+  appState?: any; 
+  onImportState?: (state: any) => void;
 }
 
-const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave }) => {
+const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave, appState, onImportState }) => {
   const [selectedRole, setSelectedRole] = useState<UserRole>('TEACHER');
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(initialPermissions);
   const [mode, setMode] = useState<'BASIC' | 'ADVANCED'>('BASIC');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // GitHub Sync States
+  const [ghConfig, setGhConfig] = useState<GitHubConfig>(() => {
+    const saved = localStorage.getItem('sge_gh_config');
+    return saved ? JSON.parse(saved) : { token: '', repo: '', path: 'data/sge_db.json', branch: 'main' };
+  });
+  const [showToken, setShowToken] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ type: 'idle' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
+
   useEffect(() => {
     setPermissions(initialPermissions);
   }, [initialPermissions]);
+
+  useEffect(() => {
+    localStorage.setItem('sge_gh_config', JSON.stringify(ghConfig));
+  }, [ghConfig]);
 
   const handleToggle = (module: keyof GroupPermission['modules'], field: keyof ModulePermission) => {
     setPermissions(prev => ({
@@ -85,12 +111,102 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave })
 
   const handleSave = async () => {
     setIsSaving(true);
-    // Simulate complex persistence logic for sci-fi feel
     await new Promise(resolve => setTimeout(resolve, 1500));
     onSave(permissions);
     setIsSaving(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  // Helper para codificar UTF-8 corretamente para Base64 (GitHub API requer isso)
+  const utf8_to_b64 = (str: string) => btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode(parseInt(p1, 16))));
+  const b64_to_utf8 = (str: string) => decodeURIComponent(Array.prototype.map.call(atob(str), (c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+
+  const syncToGitHub = async () => {
+    if (!ghConfig.token || !ghConfig.repo || !ghConfig.path) {
+      setSyncStatus({ type: 'error', msg: 'Configure os dados do repositório primeiro.' });
+      return;
+    }
+
+    setSyncing(true);
+    setSyncStatus({ type: 'idle', msg: 'Estabelecendo conexão segura...' });
+
+    try {
+      const baseUrl = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}`;
+      const headers = {
+        'Authorization': `token ${ghConfig.token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      };
+
+      let sha: string | undefined;
+      try {
+        const res = await fetch(`${baseUrl}?ref=${ghConfig.branch}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          sha = data.sha;
+        }
+      } catch (e) {}
+
+      const content = utf8_to_b64(JSON.stringify(appState, null, 2));
+      const payload = {
+        message: `SGE Sync: Atualização automática de dados - ${new Date().toLocaleString()}`,
+        content,
+        sha,
+        branch: ghConfig.branch
+      };
+
+      const updateRes = await fetch(baseUrl, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (updateRes.ok) {
+        setSyncStatus({ type: 'success', msg: 'Dados salvos com sucesso no GitHub!' });
+        localStorage.setItem('sge_last_sync', new Date().toISOString());
+      } else {
+        const errData = await updateRes.json();
+        throw new Error(errData.message || 'Erro ao atualizar repositório.');
+      }
+    } catch (err: any) {
+      setSyncStatus({ type: 'error', msg: `Falha no Push: ${err.message}` });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const pullFromGitHub = async () => {
+    if (!ghConfig.token || !ghConfig.repo || !ghConfig.path) {
+      setSyncStatus({ type: 'error', msg: 'Configurações insuficientes.' });
+      return;
+    }
+
+    setPulling(true);
+    setSyncStatus({ type: 'idle', msg: 'Buscando dados no servidor...' });
+
+    try {
+      const baseUrl = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}?ref=${ghConfig.branch}`;
+      const headers = {
+        'Authorization': `token ${ghConfig.token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      };
+
+      const res = await fetch(baseUrl, { headers });
+      if (!res.ok) throw new Error('Arquivo não encontrado ou erro de permissão.');
+
+      const data = await res.json();
+      const decodedContent = b64_to_utf8(data.content);
+      const importedState = JSON.parse(decodedContent);
+
+      if (onImportState) {
+        onImportState(importedState);
+        setSyncStatus({ type: 'success', msg: 'Conexão estabelecida! Dados importados com sucesso.' });
+      }
+    } catch (err: any) {
+      setSyncStatus({ type: 'error', msg: `Falha no Pull: ${err.message}` });
+    } finally {
+      setPulling(false);
+    }
   };
 
   const activePerms = permissions[selectedRole];
@@ -144,7 +260,7 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave })
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700 pb-12">
+    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 pb-20">
       <div className="flex flex-col md:flex-row items-end justify-between gap-6">
         <div>
           <div className="flex items-center gap-3 text-xs font-mono uppercase text-slate-500 tracking-widest font-black mb-3">
@@ -180,7 +296,6 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave })
       </div>
 
       <div className="bg-sci-panel/60 border border-white/10 rounded-2xl p-8 backdrop-blur-xl shadow-2xl flex flex-col lg:flex-row items-center justify-between gap-8 relative overflow-hidden">
-        {/* Visual decoration for sci-fi feel */}
         <div className="absolute top-0 right-0 w-64 h-full bg-cyan-500/5 skew-x-12 translate-x-32 pointer-events-none"></div>
         
         <div className="flex flex-wrap gap-4 relative z-10">
@@ -246,6 +361,121 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave })
            </button>
         </div>
       </div>
+
+      {/* MÓDULO: GITHUB CLOUD SYNC */}
+      <NeonCard glowColor="purple" title="Conexão Cloud: GitHub Repository" icon={<Github size={18} className="text-purple-400" />}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              <div className="space-y-6">
+                  <div className="bg-purple-500/5 p-4 rounded-xl border border-purple-500/20">
+                    <p className="text-xs text-slate-400 leading-relaxed italic">
+                        Mantenha os dados do S.G.E. centralizados em nuvem. A "Conceção" permite que você salve (Push) o estado atual ou recupere (Pull) a base de dados de um repositório Git.
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-mono uppercase text-purple-400 font-black">Personal Access Token (PAT)</label>
+                          <div className="relative">
+                              <input 
+                                type={showToken ? "text" : "password"} 
+                                className="w-full bg-slate-950 border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-sm text-white font-mono placeholder:text-slate-700"
+                                value={ghConfig.token}
+                                onChange={e => setGhConfig({...ghConfig, token: e.target.value})}
+                                placeholder="ghp_seu_token_aqui"
+                              />
+                              <button onClick={() => setShowToken(!showToken)} className="absolute right-4 top-3.5 text-slate-500 hover:text-white transition-colors">
+                                  {showToken ? <EyeOff size={18}/> : <Eye size={18}/>}
+                              </button>
+                          </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-mono uppercase text-slate-500 font-black">Repositório (dono/repo)</label>
+                            <input 
+                              type="text" 
+                              className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white"
+                              value={ghConfig.repo}
+                              onChange={e => setGhConfig({...ghConfig, repo: e.target.value})}
+                              placeholder="ex: senai-rios/sge-db"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-mono uppercase text-slate-500 font-black">Ramo (Branch)</label>
+                            <input 
+                              type="text" 
+                              className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white"
+                              value={ghConfig.branch}
+                              onChange={e => setGhConfig({...ghConfig, branch: e.target.value})}
+                            />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-mono uppercase text-slate-500 font-black">Caminho do Arquivo JSON</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white"
+                            value={ghConfig.path}
+                            onChange={e => setGhConfig({...ghConfig, path: e.target.value})}
+                          />
+                      </div>
+                  </div>
+              </div>
+
+              <div className="flex flex-col h-full justify-between gap-4">
+                  <div className={`p-6 rounded-2xl border transition-all ${syncStatus.type === 'error' ? 'bg-red-500/5 border-red-500/20' : syncStatus.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-950 border-white/5'}`}>
+                      <div className="flex items-center gap-4 mb-4">
+                          <div className={`p-3 rounded-xl ${syncStatus.type === 'error' ? 'bg-red-500/10 text-red-500' : syncStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-900 text-slate-500'}`}>
+                              {syncing || pulling ? <RefreshCcw className="animate-spin" size={24}/> : <Cloud size={24}/>}
+                          </div>
+                          <div>
+                              <p className="text-[10px] font-mono text-slate-500 uppercase font-black">Auditoria de Conexão</p>
+                              <p className={`text-sm font-bold ${syncStatus.type === 'error' ? 'text-red-400' : syncStatus.type === 'success' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                                  {syncing ? 'Efetuando Commit...' : pulling ? 'Baixando Dados...' : (syncStatus.msg || 'Aguardando ação do operador...')}
+                              </p>
+                          </div>
+                      </div>
+                      <div className="h-1 w-full bg-slate-900 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-700 ${syncing || pulling ? 'w-2/3 bg-purple-500 animate-pulse' : syncStatus.type === 'success' ? 'w-full bg-emerald-500' : 'w-0'}`}></div>
+                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <button 
+                        onClick={pullFromGitHub}
+                        disabled={pulling || syncing || !ghConfig.token}
+                        className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest border border-white/10 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                          {pulling ? <Loader2 className="animate-spin" size={16}/> : <DownloadCloud size={16}/>}
+                          Importar (Pull)
+                      </button>
+                      <button 
+                        onClick={syncToGitHub}
+                        disabled={syncing || pulling || !ghConfig.token}
+                        className="py-4 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-neon-purple active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                      >
+                          {syncing ? <Loader2 className="animate-spin" size={16}/> : <CloudUpload size={16}/>}
+                          Exportar (Push)
+                      </button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between px-2">
+                    <span className="text-[9px] font-mono text-slate-600 uppercase font-bold">
+                        Último Sync: {localStorage.getItem('sge_last_sync') ? new Date(localStorage.getItem('sge_last_sync')!).toLocaleTimeString() : 'NUNCA'}
+                    </span>
+                    <a 
+                        href={ghConfig.repo ? `https://github.com/${ghConfig.repo}/blob/${ghConfig.branch}/${ghConfig.path}` : '#'} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-[10px] font-mono text-slate-500 hover:text-purple-400 uppercase tracking-widest font-black flex items-center gap-2 transition-colors"
+                    >
+                        Abrir no Repo <ExternalLink size={12}/>
+                    </a>
+                  </div>
+              </div>
+          </div>
+      </NeonCard>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         <ModuleCard title="Dashboard" icon={<LayoutDashboard size={18}/>} moduleKey="dashboard" glowColor="blue" />

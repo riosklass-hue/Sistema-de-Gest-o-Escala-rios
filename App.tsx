@@ -82,7 +82,7 @@ const App: React.FC = () => {
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(INITIAL_PERMISSIONS);
   
   const [logs, setLogs] = useState<SystemLog[]>([
-    { id: 'l1', user: 'admin', description: 'Sistema inicializado', module: 'NÚCLEO', action: 'STARTUP', ip: '127.0.0.1', entryTime: '20/12/2025 08:00:00', exitTime: '20/12/2025 18:00:00', active: false },
+    { id: 'l1', user: 'system', description: 'Sistema inicializado', module: 'NÚCLEO', action: 'STARTUP', ip: '127.0.0.1', entryTime: new Date().toLocaleString(), active: false },
   ]);
 
   const activeEmployees = employees.filter(emp => emp.active);
@@ -102,6 +102,45 @@ const App: React.FC = () => {
     };
     setLogs(prev => [newLog, ...prev]);
   }, []);
+
+  // Função para importar estado (usada pelo Pull do GitHub)
+  const handleImportState = useCallback((state: any) => {
+    if (!state) return;
+    if (state.employees) setEmployees(state.employees);
+    if (state.globalSchedules) setGlobalSchedules(state.globalSchedules);
+    if (state.permissions) setPermissions(state.permissions);
+    if (state.classes) setClasses(state.classes);
+    if (state.courseGroups) setCourseGroups(state.courseGroups);
+    if (state.availableCourses) setAvailableCourses(state.availableCourses);
+    if (state.schools) setSchools(state.schools);
+    if (state.globalDeductions) setGlobalDeductions(state.globalDeductions);
+    if (state.hourlyRate) setHourlyRate(state.hourlyRate);
+    addLog('system', 'PULL', 'NUVEM', 'Base de dados sincronizada com GitHub');
+  }, [addLog]);
+
+  // Carregamento automático do GitHub ao iniciar (se configurado)
+  useEffect(() => {
+    const autoPull = async () => {
+      const savedConfig = localStorage.getItem('sge_gh_config');
+      if (savedConfig) {
+        try {
+          const cfg = JSON.parse(savedConfig);
+          if (cfg.token && cfg.repo && cfg.path) {
+            const baseUrl = `https://api.github.com/repos/${cfg.repo}/contents/${cfg.path}?ref=${cfg.branch}`;
+            const res = await fetch(baseUrl, { 
+                headers: { 'Authorization': `token ${cfg.token}`, 'Accept': 'application/vnd.github.v3+json' } 
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const decoded = decodeURIComponent(Array.prototype.map.call(atob(data.content), (c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+              handleImportState(JSON.parse(decoded));
+            }
+          }
+        } catch (e) { console.error("Falha no Auto-Pull:", e); }
+      }
+    };
+    autoPull();
+  }, [handleImportState]);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -177,6 +216,20 @@ const App: React.FC = () => {
       { label: 'Sistema', icon: <Zap className="w-5 h-5" />, visible: currentUser.role === 'ADMIN' },
     ].filter(item => item.visible);
   }, [currentUser, permissions]);
+
+  // Estado serializado para GitHub Sync
+  const fullAppState = useMemo(() => ({
+    employees,
+    globalSchedules,
+    permissions,
+    classes,
+    courseGroups,
+    availableCourses,
+    schools,
+    globalDeductions,
+    hourlyRate,
+    lastUpdated: new Date().toISOString()
+  }), [employees, globalSchedules, permissions, classes, courseGroups, availableCourses, schools, globalDeductions, hourlyRate]);
 
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
 
@@ -354,7 +407,14 @@ const App: React.FC = () => {
 
                {activeTab === 'Segurança' && currentRolePermissions.seguranca.visualize && <SecurityPanel logs={logs} />}
 
-               {activeTab === 'Sistema' && currentUser.role === 'ADMIN' && <SystemPanel initialPermissions={permissions} onSave={handleSavePermissions} />}
+               {activeTab === 'Sistema' && currentUser.role === 'ADMIN' && (
+                 <SystemPanel 
+                   initialPermissions={permissions} 
+                   onSave={handleSavePermissions} 
+                   appState={fullAppState}
+                   onImportState={handleImportState}
+                 />
+               )}
             </div>
           </div>
         </main>

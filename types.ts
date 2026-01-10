@@ -16,6 +16,13 @@ export interface User {
   employeeId?: string; // Linked to the employee ID for teachers
 }
 
+export interface GitHubConfig {
+  token: string;
+  repo: string; // owner/repo
+  path: string; // e.g., data/db.json
+  branch: string;
+}
+
 export interface Employee {
   id: string;
   name: string;

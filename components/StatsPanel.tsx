@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState, useCallback } from 'react';
 import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts';
 import NeonCard from './NeonCard';
@@ -7,7 +6,7 @@ import {
   CheckCircle, ChevronLeft, ChevronRight, Calculator, MinusCircle, ShieldCheck, 
   Trash2, Wand2, Loader2, Zap, Hourglass, Coffee, BarChart3, Target, 
   Briefcase, Settings, Landmark, ArrowUpRight, ArrowDownRight, 
-  PieChart as PieIcon, BookOpen, Ban, GraduationCap, Cpu
+  PieChart as PieIcon, BookOpen, Ban, GraduationCap, Cpu, Users, UserX, AlertTriangle
 } from 'lucide-react';
 import { Employee, Schedule, ShiftType, Shift } from '../types';
 import { ANNUAL_CR_2025, PORTO_VELHO_HOLIDAYS } from '../constants';
@@ -36,6 +35,14 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
   const viewedYear = selectedDate.getFullYear();
   const viewedMonth = selectedDate.getMonth();
   const [viewMode, setViewMode] = useState<'MONTH' | 'YEAR'>('MONTH');
+
+  const isBusinessDay = (date: Date): boolean => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return !PORTO_VELHO_HOLIDAYS.includes(`${mm}-${dd}`);
+  };
 
   const checkActiveAssignment = useCallback((empId: string, dateStr: string, slotKey: 'MORNING' | 'AFTERNOON' | 'NIGHT', currentSchedulesList: Schedule[]) => {
     const empSchedule = currentSchedulesList.find(s => s.employeeId === empId);
@@ -67,24 +74,32 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
     let h40 = 0, h20 = 0, hT1 = 0, hQ1 = 0, hPLAN = 0, hCancelled = 0;
     let producedHours = 0;
     let totalGross = 0;
+    const idleBreakdown: { id: string; name: string; idle: number; worked: number; potential: number; role: string; avatar: string }[] = [];
 
     const startM = viewMode === 'YEAR' ? 0 : viewedMonth;
     const endM = viewMode === 'YEAR' ? 11 : viewedMonth;
 
-    for (let m = startM; m <= endM; m++) {
-        const daysInMonth = new Date(viewedYear, m + 1, 0).getDate();
-        employees.forEach(emp => {
+    employees.forEach(emp => {
+        let empWorked = 0;
+        let empPotential = 0;
+
+        for (let m = startM; m <= endM; m++) {
+            const daysInMonth = new Date(viewedYear, m + 1, 0).getDate();
             for (let d = 1; d <= daysInMonth; d++) {
-                const dateStr = `${viewedYear}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                 const dateObj = new Date(viewedYear, m, d);
-                const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                if (!isBusinessDay(dateObj)) continue;
+                
+                empPotential += 12; // 3 slots of 4h
+                const dateStr = `${viewedYear}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
                 (['MORNING', 'AFTERNOON', 'NIGHT'] as const).forEach(slot => {
                     const asgn = checkActiveAssignment(emp.id, dateStr, slot, schedules);
                     if (asgn && [ShiftType.T1, ShiftType.Q1, ShiftType.PLAN].includes(asgn.type)) {
                         if (asgn.isCancelled) {
-                            hCancelled += 4;
-                        } else if (!isWeekend) {
+                            if (emp.id === employees[0].id) hCancelled += 4; // Only count global cancelled once (simplified)
+                        } else {
+                            empWorked += 4;
+                            // Global accumulators
                             if (slot === 'NIGHT') h20 += 4; else h40 += 4;
                             producedHours += 4;
                             if (asgn.type === ShiftType.T1) hT1 += 4; 
@@ -94,8 +109,18 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                     }
                 });
             }
+        }
+        
+        idleBreakdown.push({
+            id: emp.id,
+            name: emp.name,
+            role: emp.role,
+            avatar: emp.avatarUrl,
+            idle: Math.max(0, empPotential - empWorked),
+            worked: empWorked,
+            potential: empPotential
         });
-    }
+    });
 
     totalGross = (h40 + h20) * hourlyRate;
     const taxes = producedHours > 0 ? (deductions['40H'].ir + deductions['20H'].ir + deductions['40H'].inss + deductions['20H'].inss) : 0;
@@ -104,7 +129,8 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
     return { 
       totalGross, h40, h20, producedHours, hT1, hQ1, hPLAN, hCancelled, 
       lossPotential: hCancelled * hourlyRate,
-      taxes, unimed, totalReal: Math.max(0, totalGross - taxes - unimed)
+      taxes, unimed, totalReal: Math.max(0, totalGross - taxes - unimed),
+      idleBreakdown: idleBreakdown.sort((a, b) => b.idle - a.idle)
     };
   }, [schedules, viewedMonth, viewedYear, hourlyRate, deductions, employees, viewMode, checkActiveAssignment]);
 
@@ -124,9 +150,10 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
         employees.forEach(emp => {
           for (let d = 1; d <= days; d++) {
             const dStr = `${viewedYear}-${String(m.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            if (!isBusinessDay(new Date(viewedYear, m.month, d))) continue;
             (['MORNING', 'AFTERNOON', 'NIGHT'] as const).forEach(slot => {
               const asgn = checkActiveAssignment(emp.id, dStr, slot, schedules);
-              if (asgn && !asgn.isCancelled && (new Date(viewedYear, m.month, d).getDay() !== 0 && new Date(viewedYear, m.month, d).getDay() !== 6)) {
+              if (asgn && !asgn.isCancelled) {
                 monthlyReal += 4 * hourlyRate;
               }
             });
@@ -240,7 +267,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                                     <Pie data={courseData} innerRadius={45} outerRadius={70} paddingAngle={5} dataKey="value">
                                         {courseData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
                                     </Pie>
-                                    <Tooltip contentStyle={{ backgroundColor: '#0b1221', border: '1px solid #1e293b', borderRadius: '12px' }} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#0b1221', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }} />
                                     <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '9px', textTransform: 'uppercase' }} />
                                 </PieChart>
                             </ResponsiveContainer>
@@ -297,6 +324,73 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                       <Bar dataKey="hist" name="Histórico Ref." fill="#1e293b" radius={[4, 4, 0, 0]} opacity={0.5} barSize={20} />
                   </BarChart>
               </ResponsiveContainer>
+          </div>
+      </NeonCard>
+
+      {/* RELATÓRIO DE PROFESSORES OCIOSOS */}
+      <NeonCard title="Audit de Produtividade: Professores Ociosos" glowColor="orange" icon={<UserX size={18} className="text-red-400" />}>
+          <div className="overflow-x-auto mt-4">
+              <table className="w-full text-left border-separate border-spacing-y-2">
+                  <thead>
+                      <tr className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-black">
+                          <th className="px-4 py-2">Colaborador</th>
+                          <th className="px-4 py-2">Cargo</th>
+                          <th className="px-4 py-2 text-center">Carga Alocada</th>
+                          <th className="px-4 py-2 text-center">Capacidade</th>
+                          <th className="px-4 py-2 text-right text-red-400">Tempo Ocioso</th>
+                          <th className="px-4 py-2 text-center">Status</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {performance.idleBreakdown.map((item) => {
+                          const idlePercent = (item.idle / (item.potential || 1)) * 100;
+                          return (
+                              <tr key={item.id} className="bg-slate-900/40 hover:bg-slate-900/60 transition-colors group">
+                                  <td className="px-4 py-3 rounded-l-xl border-l border-t border-b border-white/5">
+                                      <div className="flex items-center gap-3">
+                                          <img src={item.avatar} className="w-8 h-8 rounded-full border border-white/10" alt={item.name} />
+                                          <span className="text-xs font-black text-slate-200 group-hover:text-white uppercase truncate">{item.name}</span>
+                                      </div>
+                                  </td>
+                                  <td className="px-4 py-3 border-t border-b border-white/5 text-[10px] font-bold text-slate-500 uppercase">{item.role}</td>
+                                  <td className="px-4 py-3 border-t border-b border-white/5 text-center">
+                                      <div className="flex flex-col items-center gap-1">
+                                          <span className="text-xs font-mono font-bold text-white">{item.worked}h</span>
+                                          <div className="w-16 h-1 bg-slate-950 rounded-full overflow-hidden">
+                                              <div className="h-full bg-cyan-500" style={{ width: `${(item.worked / item.potential) * 100}%` }}></div>
+                                          </div>
+                                      </div>
+                                  </td>
+                                  <td className="px-4 py-3 border-t border-b border-white/5 text-center text-xs font-mono font-bold text-slate-400">{item.potential}h</td>
+                                  <td className="px-4 py-3 border-t border-b border-white/5 text-right font-black text-xs font-mono text-red-400">
+                                      {item.idle}h
+                                  </td>
+                                  <td className="px-4 py-3 rounded-r-xl border-r border-t border-b border-white/5 text-center">
+                                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                                          idlePercent > 60 ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
+                                          idlePercent > 30 ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
+                                          'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                      }`}>
+                                          {idlePercent > 60 ? 'ALTA OCIOSIDADE' : idlePercent > 30 ? 'ATENÇÃO' : 'EFICIENTE'}
+                                      </span>
+                                  </td>
+                              </tr>
+                          );
+                      })}
+                  </tbody>
+              </table>
+          </div>
+          {performance.idleBreakdown.length === 0 && (
+              <div className="py-12 text-center space-y-3 opacity-40">
+                  <Activity size={32} className="mx-auto text-slate-600" />
+                  <p className="text-[10px] font-mono text-slate-500 uppercase font-black tracking-widest">Sem dados de produtividade para o período</p>
+              </div>
+          )}
+          <div className="mt-6 flex items-start gap-3 p-4 bg-red-950/20 border border-red-500/20 rounded-xl">
+              <AlertTriangle className="text-red-500 shrink-0" size={18} />
+              <p className="text-[10px] text-red-200/70 leading-relaxed font-medium italic">
+                A ociosidade é calculada subtraindo as horas alocadas em escala (T1, Q1, PLAN) da capacidade total de carga horária útil (Manhã, Tarde, Noite em dias úteis).
+              </p>
           </div>
       </NeonCard>
     </div>
