@@ -103,7 +103,6 @@ const App: React.FC = () => {
     setLogs(prev => [newLog, ...prev]);
   }, []);
 
-  // Função para importar estado (usada pelo Pull do GitHub)
   const handleImportState = useCallback((state: any) => {
     if (!state) return;
     if (state.employees) setEmployees(state.employees);
@@ -115,16 +114,37 @@ const App: React.FC = () => {
     if (state.schools) setSchools(state.schools);
     if (state.globalDeductions) setGlobalDeductions(state.globalDeductions);
     if (state.hourlyRate) setHourlyRate(state.hourlyRate);
-    addLog('system', 'PULL', 'NUVEM', 'Base de dados sincronizada com GitHub');
+    addLog('system', 'PULL', 'NUVEM', 'Base de dados sincronizada com servidor externo');
   }, [addLog]);
 
-  // Carregamento automático do GitHub ao iniciar (se configurado)
+  // Carregamento automático ao iniciar (Priorizando MySQL, depois GitHub)
   useEffect(() => {
     const autoPull = async () => {
-      const savedConfig = localStorage.getItem('sge_gh_config');
-      if (savedConfig) {
+      // 1. Tentar MySQL
+      const mysqlEndpoint = localStorage.getItem('sge_mysql_endpoint');
+      const mysqlKey = localStorage.getItem('sge_mysql_key');
+      if (mysqlEndpoint && mysqlKey) {
+          try {
+              const res = await fetch(mysqlEndpoint, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-API-Key': mysqlKey },
+                  body: JSON.stringify({ action: 'PULL' })
+              });
+              if (res.ok) {
+                  const data = await res.json();
+                  if (!data.error) {
+                      handleImportState(data);
+                      return; // Se carregou MySQL, não precisa GitHub
+                  }
+              }
+          } catch (e) { console.debug("Falha auto-mysql:", e); }
+      }
+
+      // 2. Tentar GitHub se MySQL falhar
+      const savedGh = localStorage.getItem('sge_gh_config');
+      if (savedGh) {
         try {
-          const cfg = JSON.parse(savedConfig);
+          const cfg = JSON.parse(savedGh);
           if (cfg.token && cfg.repo && cfg.path) {
             const baseUrl = `https://api.github.com/repos/${cfg.repo}/contents/${cfg.path}?ref=${cfg.branch}`;
             const res = await fetch(baseUrl, { 
@@ -136,7 +156,7 @@ const App: React.FC = () => {
               handleImportState(JSON.parse(decoded));
             }
           }
-        } catch (e) { console.error("Falha no Auto-Pull:", e); }
+        } catch (e) { console.error("Falha auto-gh:", e); }
       }
     };
     autoPull();
@@ -217,7 +237,6 @@ const App: React.FC = () => {
     ].filter(item => item.visible);
   }, [currentUser, permissions]);
 
-  // Estado serializado para GitHub Sync
   const fullAppState = useMemo(() => ({
     employees,
     globalSchedules,

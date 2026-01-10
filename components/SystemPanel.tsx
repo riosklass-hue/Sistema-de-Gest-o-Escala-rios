@@ -5,7 +5,7 @@ import {
   CalendarRange, FileBarChart, ShieldAlert, CheckSquare, Square, 
   Info, Save, CheckCircle, Loader2, Github, Cloud, CloudUpload, 
   Database, Eye, EyeOff, RefreshCcw, ExternalLink, DownloadCloud,
-  Server, Code, Copy, Database as DBIcon, Zap, Globe
+  Server, Code, Copy, Database as DBIcon, Zap, Globe, HardDriveDownload
 } from 'lucide-react';
 import NeonCard from './NeonCard';
 import { GroupPermission, UserRole, ModulePermission, GitHubConfig } from '../types';
@@ -38,6 +38,7 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave, a
     dbName: localStorage.getItem('sge_mysql_db') || 'sge_rios_db'
   });
   const [sqlSyncing, setSqlSyncing] = useState(false);
+  const [sqlPulling, setSqlPulling] = useState(false);
   const [sqlStatus, setSqlStatus] = useState<{ type: 'idle' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
 
   // GitHub Sync States
@@ -77,9 +78,16 @@ const SystemPanel: React.FC<SystemPanelProps> = ({ initialPermissions, onSave, a
     }));
   };
 
-  // MySQL SQL Schema Code
+  // MySQL SQL Schema Code (Expanded)
   const sqlSchema = `
--- TABELA DE COLABORADORES
+-- 1. ESTRUTURA PARA ESTADO COMPLETO (Sincronismo Rápido)
+CREATE TABLE sge_state (
+    id INT PRIMARY KEY,
+    content LONGTEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 2. ESTRUTURA RELACIONAL (Para queries complexas se necessário)
 CREATE TABLE employees (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -87,17 +95,16 @@ CREATE TABLE employees (
     role VARCHAR(100),
     username VARCHAR(100) UNIQUE,
     email VARCHAR(150),
-    active BOOLEAN DEFAULT TRUE,
-    last_sync TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    active BOOLEAN DEFAULT TRUE
 );
 
--- TABELA DE ESCALAS
-CREATE TABLE schedules (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    employee_id VARCHAR(50),
-    shift_date DATE,
-    shift_type ENUM('T1', 'Q1', 'PLAN', 'OFF', 'FINAL'),
-    FOREIGN KEY (employee_id) REFERENCES employees(id)
+CREATE TABLE class_groups (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    type ENUM('Técnico', 'Qualificação'),
+    course_group VARCHAR(100),
+    start_date DATE,
+    end_date DATE
 );
   `.trim();
 
@@ -107,18 +114,49 @@ CREATE TABLE schedules (
       return;
     }
     setSqlSyncing(true);
+    setSqlStatus({ type: 'idle', msg: 'Transmitindo pacotes para o Hostinger...' });
     try {
       const res = await fetch(sqlConfig.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': sqlConfig.apiKey },
         body: JSON.stringify({ action: 'PUSH', database: sqlConfig.dbName, payload: appState })
       });
-      if (res.ok) setSqlStatus({ type: 'success', msg: 'Base MySQL sincronizada com sucesso!' });
-      else throw new Error('Falha na comunicação com o servidor MySQL.');
+      if (res.ok) {
+          setSqlStatus({ type: 'success', msg: 'Base de dados Hostinger/MySQL atualizada!' });
+          localStorage.setItem('sge_last_mysql_sync', new Date().toISOString());
+      } else throw new Error('Falha na autenticação ou conexão com o servidor PHP.');
     } catch (e: any) {
       setSqlStatus({ type: 'error', msg: e.message });
     } finally {
       setSqlSyncing(false);
+    }
+  };
+
+  const pullFromMySQL = async () => {
+    if (!sqlConfig.endpoint) {
+        setSqlStatus({ type: 'error', msg: 'Endpoint ausente.' });
+        return;
+    }
+    setSqlPulling(true);
+    setSqlStatus({ type: 'idle', msg: 'Recuperando dados do MySQL...' });
+    try {
+        const res = await fetch(sqlConfig.endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': sqlConfig.apiKey },
+            body: JSON.stringify({ action: 'PULL', database: sqlConfig.dbName })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            if (onImportState) {
+                onImportState(data);
+                setSqlStatus({ type: 'success', msg: 'Estado do sistema restaurado do MySQL.' });
+            }
+        } else throw new Error('Falha ao obter dados do banco.');
+    } catch (e: any) {
+        setSqlStatus({ type: 'error', msg: e.message });
+    } finally {
+        setSqlPulling(false);
     }
   };
 
@@ -271,34 +309,44 @@ CREATE TABLE schedules (
 
       {activeConfigTab === 'MYSQL' && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-8">
-            <NeonCard glowColor="orange" title="Engine de Dados: MySQL Integration" icon={<DBIcon size={18} className="text-orange-400" />}>
+            <NeonCard glowColor="orange" title="Engine de Dados: MySQL / Hostinger" icon={<DBIcon size={18} className="text-orange-400" />}>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="space-y-6">
                         <div className="bg-orange-500/5 p-4 rounded-xl border border-orange-500/20">
-                            <p className="text-xs text-slate-400 leading-relaxed">Conecte o S.G.E Rios a um banco de dados **MySQL** real através de uma API de ponte. Configure seu endpoint REST para persistir os dados em tabelas relacionais.</p>
+                            <p className="text-xs text-slate-400 leading-relaxed">Conecte o S.G.E Rios ao seu servidor na **Hostinger**. Use o script `sge_bridge.php` no seu servidor para processar as requisições.</p>
                         </div>
                         <div className="space-y-4">
-                            <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-orange-400 font-black">API Gateway URL (Endpoint)</label><div className="relative"><Globe size={16} className="absolute left-4 top-3.5 text-slate-600" /><input type="text" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3.5 pl-12 pr-4 text-sm text-white font-mono" value={sqlConfig.endpoint} onChange={e => setSqlConfig({...sqlConfig, endpoint: e.target.value})} placeholder="https://api.seusite.com/mysql-sync" /></div></div>
+                            <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-orange-400 font-black">URL do Script Bridge (PHP)</label><div className="relative"><Globe size={16} className="absolute left-4 top-3.5 text-slate-600" /><input type="text" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3.5 pl-12 pr-4 text-sm text-white font-mono" value={sqlConfig.endpoint} onChange={e => setSqlConfig({...sqlConfig, endpoint: e.target.value})} placeholder="https://seu-site.com.br/sge_bridge.php" /></div></div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-slate-500 font-black">Database Name</label><input type="text" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white" value={sqlConfig.dbName} onChange={e => setSqlConfig({...sqlConfig, dbName: e.target.value})} /></div>
-                                <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-slate-500 font-black">API Secret Key</label><input type="password" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white" value={sqlConfig.apiKey} onChange={e => setSqlConfig({...sqlConfig, apiKey: e.target.value})} placeholder="••••••••" /></div>
+                                <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-slate-500 font-black">DB Hostinger</label><input type="text" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white" value={sqlConfig.dbName} onChange={e => setSqlConfig({...sqlConfig, dbName: e.target.value})} /></div>
+                                <div className="space-y-2"><label className="text-[10px] font-mono uppercase text-slate-500 font-black">Chave API (Bridge)</label><input type="password" className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 px-4 text-xs text-white" value={sqlConfig.apiKey} onChange={e => setSqlConfig({...sqlConfig, apiKey: e.target.value})} placeholder="••••••••" /></div>
                             </div>
                         </div>
-                        <button onClick={syncToMySQL} disabled={sqlSyncing} className="w-full py-5 bg-orange-600 hover:bg-orange-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-neon-orange transition-all flex items-center justify-center gap-4">
-                            {sqlSyncing ? <Loader2 className="animate-spin" size={20}/> : <Zap size={20}/>}
-                            Sincronizar com MySQL
-                        </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <button onClick={pullFromMySQL} disabled={sqlPulling || sqlSyncing} className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-xs uppercase tracking-widest border border-white/10 transition-all flex items-center justify-center gap-3">
+                                {sqlPulling ? <Loader2 className="animate-spin" size={18}/> : <HardDriveDownload size={18}/>}
+                                Importar do MySQL
+                            </button>
+                            <button onClick={syncToMySQL} disabled={sqlSyncing || sqlPulling} className="py-4 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-neon-orange transition-all flex items-center justify-center gap-3">
+                                {sqlSyncing ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18}/>}
+                                Salvar no MySQL
+                            </button>
+                        </div>
+                        {sqlStatus.msg && (
+                            <div className={`p-4 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ${sqlStatus.type === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                <Info size={14}/> {sqlStatus.msg}
+                            </div>
+                        )}
                     </div>
 
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Code size={16} className="text-cyan-400"/><h4 className="text-[10px] font-mono font-black text-slate-400 uppercase">Schema MySQL (Gerado)</h4></div><button onClick={() => navigator.clipboard.writeText(sqlSchema)} className="p-2 bg-slate-900 border border-white/10 rounded-lg text-slate-400 hover:text-white"><Copy size={14}/></button></div>
+                        <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Code size={16} className="text-cyan-400"/><h4 className="text-[10px] font-mono font-black text-slate-400 uppercase">Schema MySQL Sugerido</h4></div><button onClick={() => navigator.clipboard.writeText(sqlSchema)} className="p-2 bg-slate-900 border border-white/10 rounded-lg text-slate-400 hover:text-white"><Copy size={14}/></button></div>
                         <div className="relative">
                             <div className="absolute top-0 left-0 w-1 h-full bg-orange-500/50"></div>
-                            <pre className="bg-slate-950 p-5 rounded-xl border border-white/5 text-[10px] font-mono text-cyan-500/80 overflow-x-auto max-h-[300px] scrollbar-hide">
+                            <pre className="bg-slate-950 p-5 rounded-xl border border-white/5 text-[10px] font-mono text-cyan-500/80 overflow-x-auto max-h-[350px] scrollbar-hide">
                                 {sqlSchema}
                             </pre>
                         </div>
-                        <div className="p-4 bg-slate-900/50 rounded-xl border border-white/10 flex items-start gap-3"><Info size={16} className="text-blue-400 shrink-0 mt-0.5"/><p className="text-[9px] text-slate-500 leading-relaxed uppercase font-black">Execute este script no seu MySQL Workbench ou PHPMyAdmin para preparar as tabelas de destino antes do primeiro sincronismo.</p></div>
                     </div>
                 </div>
             </NeonCard>
@@ -311,7 +359,7 @@ CREATE TABLE schedules (
          <div>
             <h4 className="text-base font-black text-white uppercase tracking-widest mb-2">Segurança de Dados Relacionais</h4>
             <p className="text-sm text-slate-500 font-medium leading-relaxed">
-              O módulo MySQL opera em modo de sincronismo incremental. Certifique-se que o seu endpoint de API trate adequadamente os métodos CORS e cabeçalhos de segurança <strong className="text-orange-400">X-API-Key</strong> para prevenir acessos não autorizados à sua infraestrutura.
+              O módulo MySQL opera através de uma API Bridge. Certifique-se que o seu script PHP trate adequadamente as permissões de acesso e evite SQL Injection ao gravar os metadados. Recomendamos o uso de SSL/HTTPS no seu domínio da Hostinger.
             </p>
          </div>
       </div>
