@@ -1,6 +1,6 @@
 
 <!DOCTYPE html>
-<html lang="pt-BR" style="font-size: 100%;">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,8 +16,8 @@
               mono: ['JetBrains Mono', 'monospace'],
             },
             colors: {
-              'sci-bg': '#030712', // Very dark blue/black
-              'sci-panel': '#0b1221', // Dark blue panel
+              'sci-bg': '#030712',
+              'sci-panel': '#0b1221',
               'neon-cyan': '#00f3ff',
               'neon-purple': '#bc13fe',
               'neon-orange': '#ff9900',
@@ -37,44 +37,30 @@
         background-color: #030712;
         color: #e2e8f0;
         overflow-x: hidden;
-        -webkit-font-smoothing: antialiased;
       }
-      /* Custom Scrollbar for Sci-Fi feel */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #0b1221; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #1e293b; 
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #334155; 
-      }
-      
-      /* Smooth transitions for zoom effect */
-      .zoom-container {
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        transform-origin: top center;
-      }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #0b1221; }
+      ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+      .zoom-container { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); transform-origin: top center; }
     </style>
   <script type="importmap">
 {
   "imports": {
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
-    "recharts": "https://esm.sh/recharts@^3.5.1",
-    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3"
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
+    <!-- Ponto de entrada fundamental para o Vite -->
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>
