@@ -8,10 +8,13 @@ import LoginScreen from './components/LoginScreen';
 import RegistrationPanel from './components/RegistrationPanel';
 import SystemPanel from './components/SystemPanel';
 import { INITIAL_EMPLOYEES } from './constants';
-import { Menu, Bell, Search, Hexagon, TriangleAlert, LogOut, Activity, User as UserIcon, Database, Shield, Zap, UserPlus, LayoutDashboard, CalendarRange, FileBarChart, ShieldAlert, X, Minus, Plus, RotateCcw } from 'lucide-react';
+import { 
+  Menu, Bell, Search, Hexagon, LogOut, Activity, 
+  UserPlus, CalendarRange, Database, Shield, Zap, X, 
+  Minus, Plus, Cpu, Globe, Wifi, Command, Terminal
+} from 'lucide-react';
 import NeonCard from './components/NeonCard';
 import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole, ClassGroup, CourseGroup } from './types';
-import { generateSmartSchedule } from './services/geminiService';
 import { syncUserRecord } from './services/authService';
 
 const INITIAL_PERMISSIONS: Record<UserRole, GroupPermission> = {
@@ -62,7 +65,8 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('Escalas');
   const [insight, setInsight] = useState<string>('');
-  const [zoomLevel, setZoomLevel] = useState(75); 
+  const [zoomLevel, setZoomLevel] = useState(80); 
+  const [systemUptime, setSystemUptime] = useState(0);
   
   const [viewedDate, setViewedDate] = useState(new Date());
   const [hourlyRate, setHourlyRate] = useState(32.00);
@@ -82,7 +86,7 @@ const App: React.FC = () => {
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(INITIAL_PERMISSIONS);
   
   const [logs, setLogs] = useState<SystemLog[]>([
-    { id: 'l1', user: 'system', description: 'Sistema inicializado', module: 'NÚCLEO', action: 'STARTUP', ip: '127.0.0.1', entryTime: new Date().toLocaleString(), active: false },
+    { id: 'l1', user: 'system', description: 'Kernel SGE v2.5 Online', module: 'CORE', action: 'BOOT', ip: '127.0.0.1', entryTime: new Date().toLocaleString(), active: false },
   ]);
 
   const activeEmployees = employees.filter(emp => emp.active);
@@ -91,6 +95,12 @@ const App: React.FC = () => {
     '40H': { ir: 0, inss: 0, unimed: 0 },
     '20H': { ir: 0, inss: 0, unimed: 0 }
   });
+
+  // System Uptime Counter
+  useEffect(() => {
+    const timer = setInterval(() => setSystemUptime(u => u + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const addLog = useCallback((user: string, action: string, module: string, description: string) => {
     const newLog: SystemLog = {
@@ -114,13 +124,11 @@ const App: React.FC = () => {
     if (state.schools) setSchools(state.schools);
     if (state.globalDeductions) setGlobalDeductions(state.globalDeductions);
     if (state.hourlyRate) setHourlyRate(state.hourlyRate);
-    addLog('system', 'PULL', 'NUVEM', 'Base de dados sincronizada com servidor externo');
+    addLog('system', 'PULL', 'CLOUD', 'Data synchronized from central node');
   }, [addLog]);
 
-  // Carregamento automático ao iniciar (Priorizando MySQL, depois GitHub)
   useEffect(() => {
     const autoPull = async () => {
-      // 1. Tentar MySQL
       const mysqlEndpoint = localStorage.getItem('sge_mysql_endpoint');
       const mysqlKey = localStorage.getItem('sge_mysql_key');
       if (mysqlEndpoint && mysqlKey) {
@@ -134,29 +142,10 @@ const App: React.FC = () => {
                   const data = await res.json();
                   if (!data.error) {
                       handleImportState(data);
-                      return; // Se carregou MySQL, não precisa GitHub
+                      return;
                   }
               }
-          } catch (e) { console.debug("Falha auto-mysql:", e); }
-      }
-
-      // 2. Tentar GitHub se MySQL falhar
-      const savedGh = localStorage.getItem('sge_gh_config');
-      if (savedGh) {
-        try {
-          const cfg = JSON.parse(savedGh);
-          if (cfg.token && cfg.repo && cfg.path) {
-            const baseUrl = `https://api.github.com/repos/${cfg.repo}/contents/${cfg.path}?ref=${cfg.branch}`;
-            const res = await fetch(baseUrl, { 
-                headers: { 'Authorization': `token ${cfg.token}`, 'Accept': 'application/vnd.github.v3+json' } 
-            });
-            if (res.ok) {
-              const data = await res.json();
-              const decoded = decodeURIComponent(Array.prototype.map.call(atob(data.content), (c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-              handleImportState(JSON.parse(decoded));
-            }
-          }
-        } catch (e) { console.error("Falha auto-gh:", e); }
+          } catch (e) { console.debug("Auto-mysql fail:", e); }
       }
     };
     autoPull();
@@ -164,19 +153,19 @@ const App: React.FC = () => {
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
-    addLog(user.username, 'LOGIN', 'USUÁRIOS', 'Acesso autorizado ao SGE');
+    addLog(user.username, 'LOGIN', 'AUTH', 'Secure authentication established');
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   const handleLogout = () => {
-    if (currentUser) addLog(currentUser.username, 'LOGOUT', 'USUÁRIOS', 'Sessão encerrada');
+    if (currentUser) addLog(currentUser.username, 'LOGOUT', 'AUTH', 'Session terminated');
     setCurrentUser(null);
     setActiveTab('Escalas');
   };
 
   const handleSavePermissions = (newPermissions: Record<UserRole, GroupPermission>) => {
     setPermissions(newPermissions);
-    if (currentUser) addLog(currentUser.username, 'PERMISSÕES', 'SISTEMA', 'Vínculos de acesso de grupo atualizados');
+    if (currentUser) addLog(currentUser.username, 'PERM_UPDATE', 'SYSTEM', 'Global access protocols updated');
   };
 
   const adjustZoom = (delta: number) => {
@@ -184,13 +173,13 @@ const App: React.FC = () => {
   };
 
   const resetZoom = () => {
-    setZoomLevel(75); 
+    setZoomLevel(80); 
   };
 
   useEffect(() => {
     if (!currentUser) return;
     const monthName = viewedDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-    setInsight(activeTab === 'Sistema' ? 'Configurações de Kernel: Gerenciando Vínculos de Acesso.' : `S.G.E. Rios: Monitorando ${monthName}.`);
+    setInsight(activeTab === 'Sistema' ? 'Accessing Kernel Configuration Mode.' : `S.G.E. Command Center: Active Monitoring of ${monthName}.`);
   }, [activeTab, currentUser, viewedDate]);
 
   const handleRegisterEmployee = async (newEmployee: Employee) => {
@@ -201,7 +190,7 @@ const App: React.FC = () => {
             role: newEmployee.userRole || 'TEACHER'
         });
     }
-    if (currentUser) addLog(currentUser.username, 'CADASTRO', 'VÍNCULO', `Novo colaborador ${newEmployee.name} vinculado ao SGE`);
+    if (currentUser) addLog(currentUser.username, 'CREATE', 'RECORD', `New operative ${newEmployee.name} registered`);
   };
 
   const handleUpdateEmployee = async (updatedEmployee: Employee, newPassword?: string) => {
@@ -216,12 +205,12 @@ const App: React.FC = () => {
         setCurrentUser({ ...currentUser, name: updatedEmployee.name, role: updatedEmployee.userRole || 'TEACHER' });
       }
     }
-    if (currentUser) addLog(currentUser.username, 'EDITAR', 'CADASTRO', `Dados e permissões de ${updatedEmployee.name} sincronizados`);
+    if (currentUser) addLog(currentUser.username, 'UPDATE', 'RECORD', `Metadata updated for node: ${updatedEmployee.name}`);
   };
 
   const handleDeleteEmployee = (id: string) => {
     setEmployees(prev => prev.filter(emp => emp.id !== id));
-    if (currentUser) addLog(currentUser.username, 'REMOVER', 'CADASTRO', `Vínculo de colaborador ID ${id} excluído`);
+    if (currentUser) addLog(currentUser.username, 'DELETE', 'RECORD', `Operative node ID ${id} purged from system`);
   };
 
   const menuItems = useMemo(() => {
@@ -260,32 +249,41 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-sci-bg text-slate-200 font-sans selection:bg-cyan-500/30">
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-900/10 rounded-full blur-[100px] animate-pulse"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-900/10 rounded-full blur-[100px] animate-pulse"></div>
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
+      {/* Dynamic Background Effects */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden bg-grid-pulse">
+        <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] bg-cyan-900/10 rounded-full blur-[150px]"></div>
+        <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[50%] bg-purple-900/10 rounded-full blur-[150px]"></div>
+        
+        {/* Futuristic Scanning Overlays */}
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
       </div>
 
       <div className="relative z-10 flex h-screen overflow-hidden">
         {isSidebarOpen && (
           <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] md:hidden transition-opacity duration-300"
+            className="fixed inset-0 bg-black/70 backdrop-blur-md z-[90] md:hidden transition-opacity duration-500"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
 
         <aside className={`
           fixed md:relative z-[100] h-full
-          ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full md:translate-x-0 md:w-20'} 
-          bg-sci-panel/95 md:bg-sci-panel/90 backdrop-blur-xl border-r border-white/10 
-          transition-all duration-300 flex flex-col justify-between
+          ${isSidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0 md:w-20'} 
+          bg-[#0f172a]/95 md:bg-[#0f172a]/80 backdrop-blur-2xl border-r border-white/5 
+          transition-all duration-500 flex flex-col justify-between
         `}>
           <div>
-            <div className="h-20 flex items-center justify-between px-6 border-b border-white/10">
+            <div className="h-24 flex items-center justify-between px-8 border-b border-white/5 bg-white/[0.01]">
               <div className="flex items-center">
-                <Hexagon className="text-cyan-400 w-8 h-8 animate-spin-slow" />
+                <div className="relative">
+                  <Hexagon className="text-cyan-400 w-10 h-10 animate-spin-slow" />
+                  <div className="absolute inset-0 bg-cyan-500/20 blur-xl animate-pulse"></div>
+                </div>
                 {(isSidebarOpen || window.innerWidth < 768) && (
-                  <span className="ml-3 font-mono font-black text-lg tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">RIOS</span>
+                  <div className="ml-4">
+                    <span className="font-mono font-black text-xl tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">RIOS</span>
+                    <p className="text-[8px] font-mono text-cyan-500/60 uppercase tracking-widest font-black">COMMAND CENTER v2.5</p>
+                  </div>
                 )}
               </div>
               <button 
@@ -295,7 +293,7 @@ const App: React.FC = () => {
                 <X size={20} />
               </button>
             </div>
-            <nav className="p-3 space-y-2">
+            <nav className="p-4 space-y-3">
               {menuItems.map((item, idx) => (
                 <button 
                   key={idx} 
@@ -304,80 +302,99 @@ const App: React.FC = () => {
                     if (window.innerWidth < 768) setIsSidebarOpen(false);
                   }} 
                   className={`
-                    w-full flex items-center p-3.5 rounded-xl transition-all group 
-                    ${activeTab === item.label ? 'bg-gradient-to-r from-cyan-900/30 to-transparent border-l-4 border-cyan-400 text-cyan-300 shadow-[inset_0_0_15px_rgba(0,243,255,0.05)]' : 'hover:bg-white/5 text-slate-500 hover:text-white'}
+                    w-full flex items-center p-4 rounded-xl transition-all duration-300 group relative
+                    ${activeTab === item.label ? 'bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 shadow-neon-cyan/5' : 'hover:bg-white/[0.03] text-slate-500 hover:text-slate-300'}
                   `}
                 >
-                  <div className={`${activeTab === item.label ? 'text-cyan-400 drop-shadow-[0_0_8px_rgba(0,243,255,0.4)]' : ''}`}>
+                  <div className={`${activeTab === item.label ? 'text-cyan-400 drop-shadow-[0_0_8px_rgba(0,243,255,0.6)]' : 'group-hover:text-slate-300'} transition-all`}>
                     {item.icon}
                   </div>
                   {(isSidebarOpen || window.innerWidth < 768) && (
-                    <span className="ml-3 font-bold text-sm uppercase tracking-tighter">{item.label}</span>
+                    <span className="ml-4 font-bold text-xs uppercase tracking-[0.15em] font-mono">{item.label}</span>
+                  )}
+                  {activeTab === item.label && (
+                    <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-neon-cyan"></div>
                   )}
                 </button>
               ))}
             </nav>
           </div>
-          <div className="p-3 border-t border-white/10">
+          
+          <div className="p-4 border-t border-white/5 bg-white/[0.01]">
             {(isSidebarOpen || window.innerWidth < 768) && (
-              <div className="bg-slate-900/40 p-3 rounded-xl border border-white/5 flex items-center justify-between">
-                <div className="overflow-hidden">
-                    <p className="text-[10px] font-mono text-slate-500 mb-0.5 uppercase tracking-tighter">Ativo</p>
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-white font-mono truncate font-black uppercase">{currentUser.username}</span>
+              <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-white/10 transition-all">
+                <div className="overflow-hidden flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center shrink-0">
+                      <Terminal size={14} className="text-cyan-400" />
+                    </div>
+                    <div className="truncate">
+                        <p className="text-[8px] font-mono text-slate-500 mb-0.5 uppercase font-black">Operator ID</p>
+                        <span className="text-[10px] text-white font-mono truncate font-black uppercase tracking-wider">{currentUser.username}</span>
                     </div>
                 </div>
-                <button onClick={handleLogout} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors">
-                  <LogOut size={16} />
+                <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-red-400 transition-all active:scale-90">
+                  <LogOut size={18} />
                 </button>
               </div>
             )}
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <header className="h-20 bg-sci-panel/50 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-6 md:px-8">
-            <div className="flex items-center gap-4">
+        <main className="flex-1 flex flex-col overflow-hidden relative bg-black/10">
+          <header className="h-24 bg-[#0f172a]/60 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-8 md:px-12">
+            <div className="flex items-center gap-6">
               <button 
                 onClick={() => setIsSidebarOpen(true)} 
-                className={`p-2 text-slate-400 hover:text-white md:hidden ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+                className={`p-3 text-slate-400 hover:text-white md:hidden border border-white/5 rounded-xl bg-white/[0.02] ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100 transition-opacity'}`}
               >
                 <Menu size={24} />
               </button>
               
-              <div className="hidden sm:flex items-center bg-[#1a1412] text-slate-300 px-4 py-1.5 rounded-full border border-white/5 gap-4 shadow-xl">
-                  <span className="text-sm font-mono font-bold min-w-[3ch]">{zoomLevel}%</span>
-                  <div className="flex items-center gap-1">
-                      <button onClick={() => adjustZoom(-5)} className="p-1 hover:bg-white/10 rounded transition-colors" title="Diminuir">
-                          <Minus size={14} />
-                      </button>
-                      <button onClick={() => adjustZoom(5)} className="p-1 hover:bg-white/10 rounded transition-colors" title="Aumentar">
-                          <Plus size={14} />
-                      </button>
+              {/* HUD DATA ELEMENTS */}
+              <div className="hidden lg:flex items-center gap-8 bg-black/40 px-6 py-2.5 rounded-2xl border border-white/5 shadow-2xl">
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Uptime</span>
+                    <span className="text-[10px] font-mono text-cyan-400 font-bold">{Math.floor(systemUptime / 3600).toString().padStart(2, '0')}:{Math.floor((systemUptime % 3600) / 60).toString().padStart(2, '0')}:{(systemUptime % 60).toString().padStart(2, '0')}</span>
                   </div>
-                  <button onClick={resetZoom} className="px-3 py-0.5 text-xs font-bold border border-white/10 rounded-full hover:bg-white/5 transition-colors">
-                      Redefinir
-                  </button>
+                  <div className="h-6 w-px bg-white/10"></div>
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Scale</span>
+                    <span className="text-[10px] font-mono text-purple-400 font-bold">{zoomLevel}%</span>
+                  </div>
+                  <div className="flex items-center gap-2 ml-2">
+                      <button onClick={() => adjustZoom(-5)} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all"><Minus size={14} /></button>
+                      <button onClick={() => adjustZoom(5)} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all"><Plus size={14} /></button>
+                      <button onClick={resetZoom} className="ml-2 p-1.5 text-[8px] font-black font-mono border border-white/10 rounded-lg hover:bg-white/5 transition-all text-slate-500 hover:text-cyan-400">RST</button>
+                  </div>
               </div>
             </div>
             
-            <div className="hidden lg:block overflow-hidden w-full max-w-sm relative h-6 mx-4">
-                <p className="absolute w-full text-sm font-mono text-cyan-500/80 whitespace-nowrap animate-marquee font-semibold">{insight}</p>
+            <div className="hidden xl:block overflow-hidden w-full max-w-md relative h-8 mx-8">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/5 to-transparent animate-pulse rounded-full"></div>
+                <p className="absolute w-full text-[10px] font-mono text-cyan-400/90 whitespace-nowrap animate-marquee font-bold py-2 tracking-widest uppercase flex items-center gap-4">
+                  <Wifi size={12} className="animate-pulse" /> {insight} <Globe size={12} /> SYSTEM STATUS: OPTIMAL <Cpu size={12} /> KERNEL v2.5.0-STABLE
+                </p>
             </div>
 
-            <div className="flex items-center gap-3 md:gap-6">
+            <div className="flex items-center gap-6">
                 <div className="text-right hidden sm:block">
-                    <p className="text-sm font-bold text-white tracking-wide">{currentUser.name}</p>
-                    <p className="text-xs text-slate-400 uppercase tracking-widest font-mono">{currentUser.role}</p>
+                    <p className="text-sm font-black text-white tracking-tight font-mono">{currentUser.name}</p>
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-mono font-black">{currentUser.role}</p>
+                    </div>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-500 p-[2px] shadow-neon-cyan/20">
-                    <img src={`https://ui-avatars.com/api/?name=${currentUser.name}&background=0b1221&color=fff`} alt="User" className="rounded-full w-full h-full border-2 border-sci-panel" />
+                <div className="relative group cursor-pointer">
+                  <div className="absolute inset-0 bg-cyan-500/20 blur-lg rounded-full group-hover:bg-cyan-500/40 transition-all"></div>
+                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#0f172a] to-[#1e293b] p-0.5 border border-white/10 shadow-xl rotate-3 group-hover:rotate-0 transition-all duration-500">
+                      <img src={`https://ui-avatars.com/api/?name=${currentUser.name}&background=0f172a&color=00f3ff&bold=true`} alt="User" className="rounded-xl w-full h-full object-cover" />
+                  </div>
                 </div>
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8">
-            <div className="max-w-full mx-auto zoom-container" style={{ zoom: `${zoomLevel}%` }}>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-12 scrollbar-thin">
+            <div className="max-w-full mx-auto zoom-container" style={{ transform: `scale(${zoomLevel / 100})` }}>
                {activeTab === 'Dashboard' && currentRolePermissions.dashboard.visualize && (
                   <StatsPanel 
                     isAdmin={currentUser.role === 'ADMIN'}
@@ -436,6 +453,12 @@ const App: React.FC = () => {
                )}
             </div>
           </div>
+          
+          {/* Futuristic HUD Frame / Corners */}
+          <div className="absolute top-4 left-4 w-12 h-12 border-t-2 border-l-2 border-cyan-500/20 rounded-tl-3xl pointer-events-none"></div>
+          <div className="absolute top-4 right-4 w-12 h-12 border-t-2 border-r-2 border-cyan-500/20 rounded-tr-3xl pointer-events-none"></div>
+          <div className="absolute bottom-4 left-4 w-12 h-12 border-b-2 border-l-2 border-cyan-500/20 rounded-bl-3xl pointer-events-none"></div>
+          <div className="absolute bottom-4 right-4 w-12 h-12 border-b-2 border-r-2 border-cyan-500/20 rounded-br-3xl pointer-events-none"></div>
         </main>
       </div>
     </div>
