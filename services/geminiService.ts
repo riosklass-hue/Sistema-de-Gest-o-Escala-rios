@@ -1,16 +1,16 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Employee, ShiftType } from "../types";
+import { Employee } from "../types";
 import { PORTO_VELHO_HOLIDAYS } from "../constants";
 
-// Initialize Gemini Client
+// Inicialização conforme diretrizes oficiais
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateSmartSchedule = async (
   employees: Employee[],
   year: number,
   month: number,
-  currentSchedulesContext?: any // Added context to help AI understand what's missing
+  currentSchedulesContext?: any
 ): Promise<any[]> => {
   const modelId = "gemini-3-flash-preview"; 
   
@@ -27,17 +27,18 @@ export const generateSmartSchedule = async (
     Funcionários: ${employees.map(e => e.name).join(', ')}.
     
     Regras de Preenchimento:
-    1. Respeite as atribuições já existentes (não sugira mudanças para dias já ocupados).
-    2. FINAIS DE SEMANA e FERIADOS (${activeHolidays || 'Nenhum'}) devem ser marcados como 'OFF' (Folga) caso estejam vazios.
-    3. Dias úteis vazios devem ser preenchidos de forma equilibrada com 'T1', 'Q1' ou 'PLAN'.
-    4. Mantenha uma carga horária saudável para os colaboradores.
+    1. Respeite as atribuições já existentes.
+    2. FINAIS DE SEMANA e FERIADOS (${activeHolidays || 'Nenhum'}) devem ser marcados como 'OFF'.
+    3. Dias úteis vazios devem ser preenchidos com 'T1', 'Q1' ou 'PLAN'.
+    4. Mantenha uma carga horária saudável.
     
-    Contexto Atual (Dias já preenchidos por ID): ${JSON.stringify(currentSchedulesContext || "Vazio")}
+    Contexto Atual: ${JSON.stringify(currentSchedulesContext || "Vazio")}
 
-    Retorne APENAS um JSON array de sugestões para os espaços vazios.
+    Retorne APENAS um JSON array de sugestões.
   `;
 
   try {
+    // Chamada unificada conforme documentação v0.22
     const response = await ai.models.generateContent({
       model: modelId,
       contents: prompt,
@@ -66,7 +67,7 @@ export const generateSmartSchedule = async (
       }
     });
 
-    const text = response.text;
+    const text = response.text; // Acesso direto à propriedade .text
     if (!text) return [];
     
     return JSON.parse(text);
