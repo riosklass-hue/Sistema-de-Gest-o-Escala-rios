@@ -3,13 +3,60 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Employee } from "../types";
 import { PORTO_VELHO_HOLIDAYS } from "../constants";
 
+export const parseFinancialDocument = async (text: string): Promise<any[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const modelId = "gemini-3-flash-preview";
+
+  const prompt = `
+    Analise o texto de OCR de uma Ficha Financeira Anual e extraia os dados mensais.
+    Identifique as colunas de meses (Jan a Dez) e as linhas de:
+    - VENCIMENTO (TOTAL DE PROVENTOS ou similar)
+    - IMPOSTO DE RENDA (6003 ou similar)
+    - INSS (6004 ou similar)
+    - TOTAL LIQUIDO (9998 ou similar)
+
+    Retorne APENAS um JSON array de objetos para cada mês encontrado que contenha dados.
+    Texto do documento: ${text}
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelId,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              month: { type: Type.INTEGER, description: "Mês de 0 (Jan) a 11 (Dez)" },
+              year: { type: Type.INTEGER },
+              gross: { type: Type.NUMBER, description: "Total de Proventos" },
+              ir: { type: Type.NUMBER, description: "Imposto de Renda" },
+              inss: { type: Type.NUMBER, description: "INSS" },
+              net: { type: Type.NUMBER, description: "Valor Líquido" }
+            },
+            required: ["month", "year", "gross", "ir", "inss", "net"]
+          }
+        }
+      }
+    });
+
+    const result = response.text;
+    return result ? JSON.parse(result.trim()) : [];
+  } catch (error) {
+    console.error("Erro no processamento da IA Fiscal:", error);
+    return [];
+  }
+};
+
 export const generateSmartSchedule = async (
   employees: Employee[],
   year: number,
   month: number,
   currentSchedulesContext?: any
 ): Promise<any[]> => {
-  // Use precisely the requested initialization pattern
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const modelId = "gemini-3-flash-preview"; 
   
@@ -65,7 +112,7 @@ export const generateSmartSchedule = async (
       }
     });
 
-    const text = response.text; // Use the direct .text property as per rules
+    const text = response.text; 
     if (!text) return [];
     
     return JSON.parse(text.trim());

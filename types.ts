@@ -1,10 +1,11 @@
 
+
 export enum ShiftType {
-  T1 = 'T1',       // TÉCNICO (Technician) - VERDE
-  Q1 = 'Q1',       // TÉCNICO Q1 - AZUL
-  PLAN = 'PLAN',   // PLANEJAMENTO (Planning) - LARANJA
-  FINAL = 'FINAL', // FINAL DE SEMANA (Weekend) - BRANCO
-  OFF = 'OFF'      // FOLGA (Day off) - VERMELHO
+  T1 = 'T1',       
+  Q1 = 'Q1',       
+  PLAN = 'PLAN',   
+  FINAL = 'FINAL', 
+  OFF = 'OFF'      
 }
 
 export type UserRole = 'ADMIN' | 'TEACHER' | 'COORDINATOR' | 'SUPERVISOR';
@@ -13,38 +14,43 @@ export interface User {
   username: string;
   name: string;
   role: UserRole;
-  employeeId?: string; // Linked to the employee ID for teachers
+  employeeId?: string; 
 }
 
-export interface GitHubConfig {
-  token: string;
-  repo: string; // owner/repo
-  path: string; // e.g., data/db.json
-  branch: string;
+export interface FinancialRecord {
+  month: number; // 0-11
+  year: number;
+  gross: number;
+  ir: number;
+  inss: number;
+  net: number;
+  unimed?: number;
+  source: 'MANUAL' | 'AI_IMPORT';
+  timestamp: string;
 }
 
 export interface Employee {
   id: string;
   name: string;
-  registration?: string; // Número de Matrícula
-  birthDate?: string;    // Data de Nascimento
-  contractExpiration?: string; // Vencimento do Contrato
-  username?: string; // Linked system login
+  registration?: string; 
+  birthDate?: string;    
+  contractExpiration?: string; 
+  username?: string; 
   email?: string;
   phone?: string;
-  role: string; // Job Title
-  userRole?: UserRole; // Access Group (Permissões)
+  role: string; 
+  userRole?: UserRole; 
   avatarUrl: string;
   active: boolean; 
-  skills?: string[]; // Cursos que domina
-  qualifications?: string; // Titulações e formações
+  skills?: string[]; 
+  qualifications?: string; 
 }
 
 export interface ClassGroup {
   id: string;
   name: string;
   type: 'Técnico' | 'Qualificação';
-  courseGroupName?: string; // Vínculo com o Grupo de Curso
+  courseGroupName?: string; 
   startDate: string;
   endDate: string;
 }
@@ -86,8 +92,16 @@ export interface GroupPermission {
   }
 }
 
+// Fix: Added missing GitHubConfig interface used in SystemPanel.tsx
+export interface GitHubConfig {
+  token: string;
+  repo: string;
+  path: string;
+  branch: string;
+}
+
 export interface Shift {
-  date: string; // YYYY-MM-DD
+  date: string; 
   type: ShiftType;
   courseName?: string; 
   slotDetails?: Record<string, { 
@@ -108,7 +122,7 @@ export interface Shift {
 
 export interface Schedule {
   employeeId: string;
-  shifts: Record<string, Shift>; // Key is date YYYY-MM-DD
+  shifts: Record<string, Shift>; 
 }
 
 export interface MonthlyStats {

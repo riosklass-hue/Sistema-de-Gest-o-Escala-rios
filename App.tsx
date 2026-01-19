@@ -14,7 +14,7 @@ import {
   Minus, Plus, Cpu, Globe, Wifi, Command, Terminal
 } from 'lucide-react';
 import NeonCard from './components/NeonCard';
-import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole, ClassGroup, CourseGroup } from './types';
+import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole, ClassGroup, CourseGroup, FinancialRecord } from './types';
 import { syncUserRecord } from './services/authService';
 
 const INITIAL_PERMISSIONS: Record<UserRole, GroupPermission> = {
@@ -85,6 +85,9 @@ const App: React.FC = () => {
   const [globalSchedules, setGlobalSchedules] = useState<Schedule[]>([]);
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(INITIAL_PERMISSIONS);
   
+  // REGISTROS FINANCEIROS IMPORTADOS (EmployeeId -> Array de Registros)
+  const [importedFinancialRecords, setImportedFinancialRecords] = useState<Record<string, FinancialRecord[]>>({});
+
   const [logs, setLogs] = useState<SystemLog[]>([
     { id: 'l1', user: 'system', description: 'Kernel SGE v2.5 Online', module: 'CORE', action: 'BOOT', ip: '127.0.0.1', entryTime: new Date().toLocaleString(), active: false },
   ]);
@@ -96,7 +99,6 @@ const App: React.FC = () => {
     '20H': { ir: 0, inss: 0, unimed: 0 }
   });
 
-  // System Uptime Counter
   useEffect(() => {
     const timer = setInterval(() => setSystemUptime(u => u + 1), 1000);
     return () => clearInterval(timer);
@@ -124,32 +126,9 @@ const App: React.FC = () => {
     if (state.schools) setSchools(state.schools);
     if (state.globalDeductions) setGlobalDeductions(state.globalDeductions);
     if (state.hourlyRate) setHourlyRate(state.hourlyRate);
+    if (state.importedFinancialRecords) setImportedFinancialRecords(state.importedFinancialRecords);
     addLog('system', 'PULL', 'CLOUD', 'Data synchronized from central node');
   }, [addLog]);
-
-  useEffect(() => {
-    const autoPull = async () => {
-      const mysqlEndpoint = localStorage.getItem('sge_mysql_endpoint');
-      const mysqlKey = localStorage.getItem('sge_mysql_key');
-      if (mysqlEndpoint && mysqlKey) {
-          try {
-              const res = await fetch(mysqlEndpoint, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-API-Key': mysqlKey },
-                  body: JSON.stringify({ action: 'PULL' })
-              });
-              if (res.ok) {
-                  const data = await res.json();
-                  if (!data.error) {
-                      handleImportState(data);
-                      return;
-                  }
-              }
-          } catch (e) { console.debug("Auto-mysql fail:", e); }
-      }
-    };
-    autoPull();
-  }, [handleImportState]);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -236,8 +215,9 @@ const App: React.FC = () => {
     schools,
     globalDeductions,
     hourlyRate,
+    importedFinancialRecords,
     lastUpdated: new Date().toISOString()
-  }), [employees, globalSchedules, permissions, classes, courseGroups, availableCourses, schools, globalDeductions, hourlyRate]);
+  }), [employees, globalSchedules, permissions, classes, courseGroups, availableCourses, schools, globalDeductions, hourlyRate, importedFinancialRecords]);
 
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
 
@@ -249,12 +229,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-sci-bg text-slate-200 font-sans selection:bg-cyan-500/30">
-      {/* Dynamic Background Effects */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden bg-grid-pulse">
         <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] bg-cyan-900/10 rounded-full blur-[150px]"></div>
         <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[50%] bg-purple-900/10 rounded-full blur-[150px]"></div>
-        
-        {/* Futuristic Scanning Overlays */}
         <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
       </div>
 
@@ -350,7 +327,6 @@ const App: React.FC = () => {
                 <Menu size={24} />
               </button>
               
-              {/* HUD DATA ELEMENTS */}
               <div className="hidden lg:flex items-center gap-8 bg-black/40 px-6 py-2.5 rounded-2xl border border-white/5 shadow-2xl">
                   <div className="flex flex-col">
                     <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Uptime</span>
@@ -438,6 +414,8 @@ const App: React.FC = () => {
                     selectedDate={viewedDate}
                     classes={classes}
                     courseGroups={courseGroups}
+                    importedRecords={importedFinancialRecords}
+                    onSaveImportedRecords={(empId, records) => setImportedFinancialRecords(prev => ({...prev, [empId]: records}))}
                   />
                )}
 
@@ -454,7 +432,6 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          {/* Futuristic HUD Frame / Corners */}
           <div className="absolute top-4 left-4 w-12 h-12 border-t-2 border-l-2 border-cyan-500/20 rounded-tl-3xl pointer-events-none"></div>
           <div className="absolute top-4 right-4 w-12 h-12 border-t-2 border-r-2 border-cyan-500/20 rounded-tr-3xl pointer-events-none"></div>
           <div className="absolute bottom-4 left-4 w-12 h-12 border-b-2 border-l-2 border-cyan-500/20 rounded-bl-3xl pointer-events-none"></div>
