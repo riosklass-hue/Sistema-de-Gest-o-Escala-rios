@@ -11,11 +11,10 @@ import { INITIAL_EMPLOYEES } from './constants';
 import { 
   Menu, Bell, Search, Hexagon, LogOut, Activity, 
   UserPlus, CalendarRange, Database, Shield, Zap, X, 
-  Minus, Plus, Cpu, Globe, Wifi, Command, Terminal
+  Minus, Plus, Cpu, Globe, Wifi, Command, Terminal, HardDrive
 } from 'lucide-react';
 import NeonCard from './components/NeonCard';
 import { User, Employee, Schedule, ShiftType, SystemLog, GroupPermission, UserRole, ClassGroup, CourseGroup, FinancialRecord } from './types';
-import { syncUserRecord } from './services/authService';
 
 const INITIAL_PERMISSIONS: Record<UserRole, GroupPermission> = {
   ADMIN: {
@@ -65,7 +64,7 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('Escalas');
   const [insight, setInsight] = useState<string>('');
-  const [zoomLevel, setZoomLevel] = useState(80); 
+  const [zoomLevel, setZoomLevel] = useState(90); 
   const [systemUptime, setSystemUptime] = useState(0);
   
   const [viewedDate, setViewedDate] = useState(new Date());
@@ -84,8 +83,6 @@ const App: React.FC = () => {
   ]);
   const [globalSchedules, setGlobalSchedules] = useState<Schedule[]>([]);
   const [permissions, setPermissions] = useState<Record<UserRole, GroupPermission>>(INITIAL_PERMISSIONS);
-  
-  // REGISTROS FINANCEIROS IMPORTADOS (EmployeeId -> Array de Registros)
   const [importedFinancialRecords, setImportedFinancialRecords] = useState<Record<string, FinancialRecord[]>>({});
 
   const [logs, setLogs] = useState<SystemLog[]>([
@@ -127,69 +124,49 @@ const App: React.FC = () => {
     if (state.globalDeductions) setGlobalDeductions(state.globalDeductions);
     if (state.hourlyRate) setHourlyRate(state.hourlyRate);
     if (state.importedFinancialRecords) setImportedFinancialRecords(state.importedFinancialRecords);
-    addLog('system', 'PULL', 'CLOUD', 'Data synchronized from central node');
+    addLog('system', 'PULL', 'CLOUD', 'Sincronização de dados efetuada.');
   }, [addLog]);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
-    addLog(user.username, 'LOGIN', 'AUTH', 'Secure authentication established');
+    addLog(user.username, 'LOGIN', 'AUTH', 'Sessão iniciada com sucesso.');
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   const handleLogout = () => {
-    if (currentUser) addLog(currentUser.username, 'LOGOUT', 'AUTH', 'Session terminated');
+    if (currentUser) addLog(currentUser.username, 'LOGOUT', 'AUTH', 'Sessão encerrada.');
     setCurrentUser(null);
     setActiveTab('Escalas');
   };
 
   const handleSavePermissions = (newPermissions: Record<UserRole, GroupPermission>) => {
     setPermissions(newPermissions);
-    if (currentUser) addLog(currentUser.username, 'PERM_UPDATE', 'SYSTEM', 'Global access protocols updated');
+    addLog(currentUser?.username || 'admin', 'PERM_UPDATE', 'SYSTEM', 'Protocolos de acesso atualizados.');
   };
 
   const adjustZoom = (delta: number) => {
-    setZoomLevel(prev => Math.min(Math.max(prev + delta, 50), 150));
-  };
-
-  const resetZoom = () => {
-    setZoomLevel(80); 
+    setZoomLevel(prev => Math.min(Math.max(prev + delta, 60), 120));
   };
 
   useEffect(() => {
     if (!currentUser) return;
     const monthName = viewedDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-    setInsight(activeTab === 'Sistema' ? 'Accessing Kernel Configuration Mode.' : `S.G.E. Command Center: Active Monitoring of ${monthName}.`);
+    setInsight(activeTab === 'Sistema' ? 'Configuração de Kernel Detectada.' : `Painel Rios: Monitorando ${monthName}.`);
   }, [activeTab, currentUser, viewedDate]);
 
   const handleRegisterEmployee = async (newEmployee: Employee) => {
     setEmployees(prev => [...prev, newEmployee]);
-    if (newEmployee.username) {
-        await syncUserRecord(newEmployee.username, {
-            name: newEmployee.name,
-            role: newEmployee.userRole || 'TEACHER'
-        });
-    }
-    if (currentUser) addLog(currentUser.username, 'CREATE', 'RECORD', `New operative ${newEmployee.name} registered`);
+    addLog(currentUser?.username || 'admin', 'CREATE', 'RECORD', `Novo colaborador ${newEmployee.name} registrado.`);
   };
 
   const handleUpdateEmployee = async (updatedEmployee: Employee, newPassword?: string) => {
     setEmployees(prev => prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
-    if (updatedEmployee.username) {
-      await syncUserRecord(updatedEmployee.username, {
-          name: updatedEmployee.name,
-          role: updatedEmployee.userRole || 'TEACHER',
-          password: newPassword
-      });
-      if (currentUser && currentUser.username === updatedEmployee.username) {
-        setCurrentUser({ ...currentUser, name: updatedEmployee.name, role: updatedEmployee.userRole || 'TEACHER' });
-      }
-    }
-    if (currentUser) addLog(currentUser.username, 'UPDATE', 'RECORD', `Metadata updated for node: ${updatedEmployee.name}`);
+    addLog(currentUser?.username || 'admin', 'UPDATE', 'RECORD', `Dados de ${updatedEmployee.name} atualizados.`);
   };
 
   const handleDeleteEmployee = (id: string) => {
     setEmployees(prev => prev.filter(emp => emp.id !== id));
-    if (currentUser) addLog(currentUser.username, 'DELETE', 'RECORD', `Operative node ID ${id} purged from system`);
+    addLog(currentUser?.username || 'admin', 'DELETE', 'RECORD', `Registro ID ${id} removido.`);
   };
 
   const menuItems = useMemo(() => {
@@ -228,45 +205,37 @@ const App: React.FC = () => {
   const currentRolePermissions = permissions[currentUser.role].modules;
 
   return (
-    <div className="min-h-screen bg-sci-bg text-slate-200 font-sans selection:bg-cyan-500/30">
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden bg-grid-pulse">
-        <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] bg-cyan-900/10 rounded-full blur-[150px]"></div>
-        <div className="absolute bottom-[-15%] right-[-10%] w-[50%] h-[50%] bg-purple-900/10 rounded-full blur-[150px]"></div>
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
-      </div>
-
+    <div className="min-h-screen text-slate-100 font-sans selection:bg-neon-cyan/20 bg-sci-bg">
+      
       <div className="relative z-10 flex h-screen overflow-hidden">
         {isSidebarOpen && (
           <div 
-            className="fixed inset-0 bg-black/70 backdrop-blur-md z-[90] md:hidden transition-opacity duration-500"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] md:hidden transition-opacity duration-500"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
 
         <aside className={`
           fixed md:relative z-[100] h-full
-          ${isSidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0 md:w-20'} 
-          bg-[#0f172a]/95 md:bg-[#0f172a]/80 backdrop-blur-2xl border-r border-white/5 
-          transition-all duration-500 flex flex-col justify-between
+          ${isSidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0 md:w-24'} 
+          bg-slate-950/80 backdrop-blur-3xl border-r border-white/5 
+          transition-all duration-500 flex flex-col justify-between shadow-2xl
         `}>
           <div>
-            <div className="h-24 flex items-center justify-between px-8 border-b border-white/5 bg-white/[0.01]">
+            <div className="h-24 flex items-center justify-between px-8 border-b border-white/5">
               <div className="flex items-center">
                 <div className="relative">
-                  <Hexagon className="text-cyan-400 w-10 h-10 animate-spin-slow" />
-                  <div className="absolute inset-0 bg-cyan-500/20 blur-xl animate-pulse"></div>
+                  <Hexagon className="text-neon-cyan w-10 h-10 animate-pulse" />
+                  <div className="absolute inset-0 bg-neon-cyan/20 blur-xl"></div>
                 </div>
                 {(isSidebarOpen || window.innerWidth < 768) && (
                   <div className="ml-4">
-                    <span className="font-mono font-black text-xl tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">RIOS</span>
-                    <p className="text-[8px] font-mono text-cyan-500/60 uppercase tracking-widest font-black">COMMAND CENTER v2.5</p>
+                    <span className="font-mono font-black text-xl tracking-[0.2em] text-white">RIOS</span>
+                    <p className="text-[8px] font-mono text-neon-cyan uppercase tracking-widest font-black">SYSTEM v2.5</p>
                   </div>
                 )}
               </div>
-              <button 
-                onClick={() => setIsSidebarOpen(false)} 
-                className="md:hidden p-2 text-slate-400 hover:text-white"
-              >
+              <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 text-slate-500 hover:text-white">
                 <X size={20} />
               </button>
             </div>
@@ -279,37 +248,34 @@ const App: React.FC = () => {
                     if (window.innerWidth < 768) setIsSidebarOpen(false);
                   }} 
                   className={`
-                    w-full flex items-center p-4 rounded-xl transition-all duration-300 group relative
-                    ${activeTab === item.label ? 'bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 shadow-neon-cyan/5' : 'hover:bg-white/[0.03] text-slate-500 hover:text-slate-300'}
+                    w-full flex items-center p-4 rounded-2xl transition-all duration-500 group relative
+                    ${activeTab === item.label ? 'bg-cyan-600 text-white shadow-neon-cyan' : 'hover:bg-white/5 text-slate-500 hover:text-white'}
                   `}
                 >
-                  <div className={`${activeTab === item.label ? 'text-cyan-400 drop-shadow-[0_0_8px_rgba(0,243,255,0.6)]' : 'group-hover:text-slate-300'} transition-all`}>
+                  <div className={`${activeTab === item.label ? 'text-white' : 'group-hover:text-neon-cyan'} transition-all`}>
                     {item.icon}
                   </div>
                   {(isSidebarOpen || window.innerWidth < 768) && (
-                    <span className="ml-4 font-bold text-xs uppercase tracking-[0.15em] font-mono">{item.label}</span>
-                  )}
-                  {activeTab === item.label && (
-                    <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-neon-cyan"></div>
+                    <span className="ml-4 font-bold text-xs uppercase tracking-[0.1em] font-mono">{item.label}</span>
                   )}
                 </button>
               ))}
             </nav>
           </div>
           
-          <div className="p-4 border-t border-white/5 bg-white/[0.01]">
+          <div className="p-4 border-t border-white/5">
             {(isSidebarOpen || window.innerWidth < 768) && (
-              <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-white/10 transition-all">
+              <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-neon-cyan/50 transition-all">
                 <div className="overflow-hidden flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center shrink-0">
-                      <Terminal size={14} className="text-cyan-400" />
+                    <div className="w-8 h-8 rounded-xl bg-neon-cyan/10 border border-neon-cyan/20 flex items-center justify-center shrink-0">
+                      <Terminal size={14} className="text-neon-cyan" />
                     </div>
                     <div className="truncate">
-                        <p className="text-[8px] font-mono text-slate-500 mb-0.5 uppercase font-black">Operator ID</p>
-                        <span className="text-[10px] text-white font-mono truncate font-black uppercase tracking-wider">{currentUser.username}</span>
+                        <p className="text-[8px] font-mono text-slate-600 mb-0.5 uppercase font-black">Operador</p>
+                        <span className="text-[10px] text-slate-200 font-mono truncate font-black uppercase tracking-wider">{currentUser.username}</span>
                     </div>
                 </div>
-                <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-red-400 transition-all active:scale-90">
+                <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-red-400 transition-all">
                   <LogOut size={18} />
                 </button>
               </div>
@@ -317,60 +283,61 @@ const App: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col overflow-hidden relative bg-black/10">
-          <header className="h-24 bg-[#0f172a]/60 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-8 md:px-12">
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <header className="h-24 bg-slate-950/60 backdrop-blur-2xl border-b border-white/5 flex items-center justify-between px-8 md:px-12">
             <div className="flex items-center gap-6">
               <button 
                 onClick={() => setIsSidebarOpen(true)} 
-                className={`p-3 text-slate-400 hover:text-white md:hidden border border-white/5 rounded-xl bg-white/[0.02] ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100 transition-opacity'}`}
+                className={`p-3 text-slate-300 hover:text-white md:hidden border border-white/10 rounded-2xl bg-slate-900/40 backdrop-blur-md ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100 transition-opacity'}`}
               >
                 <Menu size={24} />
               </button>
               
-              <div className="hidden lg:flex items-center gap-8 bg-black/40 px-6 py-2.5 rounded-2xl border border-white/5 shadow-2xl">
+              <div className="hidden lg:flex items-center gap-8 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-white/5 backdrop-blur-md shadow-inner">
                   <div className="flex flex-col">
-                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Uptime</span>
-                    <span className="text-[10px] font-mono text-cyan-400 font-bold">{Math.floor(systemUptime / 3600).toString().padStart(2, '0')}:{Math.floor((systemUptime % 3600) / 60).toString().padStart(2, '0')}:{(systemUptime % 60).toString().padStart(2, '0')}</span>
+                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Sessão</span>
+                    <span className="text-[10px] font-mono text-neon-cyan font-black">{Math.floor(systemUptime / 3600).toString().padStart(2, '0')}:{Math.floor((systemUptime % 3600) / 60).toString().padStart(2, '0')}:{(systemUptime % 60).toString().padStart(2, '0')}</span>
                   </div>
-                  <div className="h-6 w-px bg-white/10"></div>
+                  <div className="h-6 w-px bg-white/5"></div>
                   <div className="flex flex-col">
-                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Scale</span>
-                    <span className="text-[10px] font-mono text-purple-400 font-bold">{zoomLevel}%</span>
+                    <span className="text-[8px] font-mono text-slate-500 uppercase font-black mb-0.5">Persistência</span>
+                    <div className="flex items-center gap-2">
+                        <HardDrive size={10} className="text-orange-400" />
+                        <span className="text-[9px] font-mono text-orange-400 font-black uppercase">Volátil</span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 ml-2">
-                      <button onClick={() => adjustZoom(-5)} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all"><Minus size={14} /></button>
-                      <button onClick={() => adjustZoom(5)} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all"><Plus size={14} /></button>
-                      <button onClick={resetZoom} className="ml-2 p-1.5 text-[8px] font-black font-mono border border-white/10 rounded-lg hover:bg-white/5 transition-all text-slate-500 hover:text-cyan-400">RST</button>
+                      <button onClick={() => adjustZoom(-5)} title="Zoom Out" className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 transition-all"><Minus size={14} /></button>
+                      <button onClick={() => adjustZoom(5)} title="Zoom In" className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 transition-all"><Plus size={14} /></button>
                   </div>
               </div>
             </div>
             
-            <div className="hidden xl:block overflow-hidden w-full max-w-md relative h-8 mx-8">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/5 to-transparent animate-pulse rounded-full"></div>
-                <p className="absolute w-full text-[10px] font-mono text-cyan-400/90 whitespace-nowrap animate-marquee font-bold py-2 tracking-widest uppercase flex items-center gap-4">
-                  <Wifi size={12} className="animate-pulse" /> {insight} <Globe size={12} /> SYSTEM STATUS: OPTIMAL <Cpu size={12} /> KERNEL v2.5.0-STABLE
+            <div className="hidden xl:block overflow-hidden w-full max-w-md relative h-8 mx-8 bg-slate-950/60 rounded-full border border-white/5 px-4 shadow-inner">
+                <p className="absolute w-full text-[10px] font-mono text-slate-400/90 whitespace-nowrap animate-marquee font-bold py-2 tracking-widest uppercase flex items-center gap-4">
+                  <Wifi size={12} className="text-neon-cyan" /> {insight} <Globe size={12} className="text-neon-purple" /> STATUS: LOCAL-RAM <Cpu size={12} className="text-slate-600" /> v2.5
                 </p>
             </div>
 
             <div className="flex items-center gap-6">
                 <div className="text-right hidden sm:block">
-                    <p className="text-sm font-black text-white tracking-tight font-mono">{currentUser.name}</p>
+                    <p className="text-sm font-black text-white tracking-tight font-mono uppercase">{currentUser.name}</p>
                     <div className="flex items-center justify-end gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-mono font-black">{currentUser.role}</p>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-[0.1em] font-mono font-black">{currentUser.role}</p>
                     </div>
                 </div>
                 <div className="relative group cursor-pointer">
-                  <div className="absolute inset-0 bg-cyan-500/20 blur-lg rounded-full group-hover:bg-cyan-500/40 transition-all"></div>
-                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#0f172a] to-[#1e293b] p-0.5 border border-white/10 shadow-xl rotate-3 group-hover:rotate-0 transition-all duration-500">
-                      <img src={`https://ui-avatars.com/api/?name=${currentUser.name}&background=0f172a&color=00f3ff&bold=true`} alt="User" className="rounded-xl w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-neon-cyan/20 blur-xl rounded-full group-hover:bg-neon-cyan/40 transition-all"></div>
+                  <div className="relative w-12 h-12 rounded-2xl bg-slate-800 p-0.5 border border-white/10 shadow-2xl transition-all duration-700 backdrop-blur-md">
+                      <img src={`https://ui-avatars.com/api/?name=${currentUser.name}&background=1e293b&color=00f3ff&bold=true`} alt="User" className="rounded-xl w-full h-full object-cover" />
                   </div>
                 </div>
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-12 scrollbar-thin">
-            <div className="max-w-full mx-auto zoom-container" style={{ transform: `scale(${zoomLevel / 100})` }}>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-12">
+            <div className="max-w-full mx-auto" style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}>
                {activeTab === 'Dashboard' && currentRolePermissions.dashboard.visualize && (
                   <StatsPanel 
                     isAdmin={currentUser.role === 'ADMIN'}
@@ -432,10 +399,10 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          <div className="absolute top-4 left-4 w-12 h-12 border-t-2 border-l-2 border-cyan-500/20 rounded-tl-3xl pointer-events-none"></div>
-          <div className="absolute top-4 right-4 w-12 h-12 border-t-2 border-r-2 border-cyan-500/20 rounded-tr-3xl pointer-events-none"></div>
-          <div className="absolute bottom-4 left-4 w-12 h-12 border-b-2 border-l-2 border-cyan-500/20 rounded-bl-3xl pointer-events-none"></div>
-          <div className="absolute bottom-4 right-4 w-12 h-12 border-b-2 border-r-2 border-cyan-500/20 rounded-br-3xl pointer-events-none"></div>
+          <div className="absolute top-4 left-4 w-12 h-12 border-t-2 border-l-2 border-white/10 rounded-tl-3xl pointer-events-none"></div>
+          <div className="absolute top-4 right-4 w-12 h-12 border-t-2 border-r-2 border-white/10 rounded-tr-3xl pointer-events-none"></div>
+          <div className="absolute bottom-4 left-4 w-12 h-12 border-b-2 border-l-2 border-white/10 rounded-bl-3xl pointer-events-none"></div>
+          <div className="absolute bottom-4 right-4 w-12 h-12 border-b-2 border-r-2 border-white/10 rounded-br-3xl pointer-events-none"></div>
         </main>
       </div>
     </div>

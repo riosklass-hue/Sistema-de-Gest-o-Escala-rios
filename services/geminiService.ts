@@ -67,20 +67,17 @@ export const generateSmartSchedule = async (
     .join(', ');
 
   const prompt = `
-    Atue como um especialista em logística de pessoal e gerenciamento de RH. 
-    Sua tarefa é PREENCHER AS LACUNAS (espaços em branco) de uma escala de trabalho para o mês ${month}/${year}.
+    Atue como um gestor de RH sênior. Sua tarefa é COMPLETAR a escala de trabalho do mês ${month}/${year}.
     
-    Funcionários: ${employees.map(e => e.name).join(', ')}.
+    DIRETRIZES PARA PREENCHIMENTO:
+    1. DIAS NÃO DIGITADOS (LACUNAS): Identifique dias úteis que não possuem turnos atribuídos e marque-os como 'OFF' (Folga).
+    2. FINAIS DE SEMANA E FERIADOS: Estes dias (${activeHolidays || 'Nenhum feriado no período'}) devem ser OBRIGATORIAMENTE marcados como 'OFF'.
+    3. MANUTENÇÃO: Não altere turnos (T1, Q1, PLAN) que já foram definidos pelo usuário no contexto.
     
-    Regras de Preenchimento:
-    1. Respeite as atribuições já existentes no contexto fornecido.
-    2. FINAIS DE SEMANA e FERIADOS (${activeHolidays || 'Nenhum identificado'}) devem ser marcados obrigatoriamente como 'OFF'.
-    3. Dias úteis vazios devem ser preenchidos estrategicamente com 'T1' (Técnico), 'Q1' (Qualificação) ou 'PLAN' (Planejamento).
-    4. Garanta uma distribuição equilibrada entre os membros da equipe.
-    
-    Contexto Atual de Escala: ${JSON.stringify(currentSchedulesContext || "Vazio")}
+    Funcionários para processar: ${employees.map(e => e.name).join(', ')}.
+    Contexto Atual da Escala: ${JSON.stringify(currentSchedulesContext || "Vazio")}
 
-    Retorne APENAS um JSON array de objetos representando os funcionários e seus respectivos turnos sugeridos.
+    Retorne um JSON array de objetos por funcionário com a lista de dias e o tipo de turno ('OFF').
   `;
 
   try {
@@ -95,30 +92,29 @@ export const generateSmartSchedule = async (
             type: Type.OBJECT,
             properties: {
               employeeId: { type: Type.STRING },
-              employeeName: { type: Type.STRING },
               shifts: {
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
                   properties: {
                     day: { type: Type.INTEGER },
-                    type: { type: Type.STRING, enum: ["T1", "Q1", "PLAN", "OFF"] }
-                  }
+                    type: { type: Type.STRING, enum: ["OFF"] }
+                  },
+                  required: ["day", "type"]
                 }
               }
-            }
+            },
+            required: ["employeeId", "shifts"]
           }
         }
       }
     });
 
     const text = response.text; 
-    if (!text) return [];
-    
-    return JSON.parse(text.trim());
+    return text ? JSON.parse(text.trim()) : [];
 
   } catch (error) {
-    console.error("AI Node Failure - Gemini Engine Error:", error);
+    console.error("AI Node Failure:", error);
     return [];
   }
 };

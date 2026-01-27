@@ -13,20 +13,21 @@ import {
 import NeonCard from './NeonCard';
 import { generateSmartSchedule } from '../services/geminiService';
 
+// Fix: Added missing ShiftCalendarProps interface to resolve build error
 interface ShiftCalendarProps {
     filterEmployeeId?: string | null;
     employees: Employee[];
-    onSave?: (schedules: Schedule[]) => void;
-    currentSchedules?: Schedule[];
-    deductions?: any;
-    externalDate?: Date;
-    onDateChange?: (date: Date) => void;
+    onSave: (schedules: Schedule[]) => void;
+    currentSchedules: Schedule[];
+    deductions: any;
+    externalDate: Date;
+    onDateChange: (date: Date) => void;
     hourlyRate: number;
     onHourlyRateChange: (rate: number) => void;
     availableCourses: string[];
     schools: string[];
     classes: ClassGroup[];
-    permission: ModulePermission; 
+    permission: ModulePermission;
     isAdmin?: boolean;
 }
 
@@ -382,46 +383,54 @@ const ShiftCalendar: React.FC<ShiftCalendarProps> = ({
     if (!permission.add) return;
     setLoading(true);
 
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    try {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        
+        // Contexto simplificado para a IA
+        const context = schedules.map(s => ({
+            employeeId: s.employeeId,
+            shifts: Object.entries(s.shifts)
+                // Fix: Cast 'shift' to 'Shift' to avoid 'unknown' type error on lines 393/394
+                .filter(([_, shift]) => (shift as Shift).type !== ShiftType.FINAL)
+                // Fix: Cast 'shift' to 'Shift' to avoid 'unknown' type error on lines 393/394
+                .map(([date, shift]) => ({ date, type: (shift as Shift).type }))
+        }));
 
-    // Conforme solicitação: Sincronizar para preencher os dias não digitados (espaços em branco) como FOLGA (OFF)
-    // Inclusive transformando finais de semana vazios em FOLGA
-    setSchedules(prev => {
-        const newSchedules = [...prev];
-        displayedEmployees.forEach(emp => {
-            const existingEmpSch = prev.find(s => s.employeeId === emp.id);
-            const shifts: Record<string, any> = existingEmpSch ? { ...existingEmpSch.shifts } : {};
+        const suggestions = await generateSmartSchedule(displayedEmployees, year, month, context);
 
-            for (let day = 1; day <= daysInMonth; day++) {
-                const dateObj = new Date(year, month, day);
-                const dayStr = formatDateStr(dateObj);
-                
-                // Consideramos "espaço em branco" se não houver shift ou se for o placeholder de FINAL DE SEMANA
-                const isBlank = !shifts[dayStr] || shifts[dayStr].type === ShiftType.FINAL;
-
-                if (isBlank) {
-                    shifts[dayStr] = { 
-                        date: dayStr, 
-                        type: ShiftType.OFF, 
-                        activeSlots: [], 
-                        courseName: 'Folga Automática' 
-                    };
-                }
-            }
-
-            const index = newSchedules.findIndex(s => s.employeeId === emp.id);
-            if (index !== -1) newSchedules[index] = { ...newSchedules[index], shifts };
-        });
-        return newSchedules;
-    });
-
-    // Simula um pequeno atraso para efeito visual de "processamento"
-    await new Promise(resolve => setTimeout(resolve, 800));
-    setLoading(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+        if (suggestions && suggestions.length > 0) {
+            setSchedules(prev => {
+                const nextSchedules = [...prev];
+                suggestions.forEach((suggestion: any) => {
+                    const empIdx = nextSchedules.findIndex(s => s.employeeId === suggestion.employeeId);
+                    if (empIdx !== -1) {
+                        const updatedShifts = { ...nextSchedules[empIdx].shifts };
+                        suggestion.shifts.forEach((s: any) => {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(s.day).padStart(2, '0')}`;
+                            // Só preenche se estiver em branco ou for placeholder de FDS
+                            if (!updatedShifts[dateStr] || updatedShifts[dateStr].type === ShiftType.FINAL) {
+                                updatedShifts[dateStr] = {
+                                    date: dateStr,
+                                    type: s.type as ShiftType,
+                                    activeSlots: [],
+                                    courseName: 'Folga Automática'
+                                };
+                            }
+                        });
+                        nextSchedules[empIdx] = { ...nextSchedules[empIdx], shifts: updatedShifts };
+                    }
+                });
+                return nextSchedules;
+            });
+            setSaveSuccess(true);
+            setTimeout(() => setSaveSuccess(false), 3000);
+        }
+    } catch (e) {
+        console.error("AI Sync Error:", e);
+    } finally {
+        setLoading(false);
+    }
   };
 
   const handleSaveSystem = () => {
